@@ -1,0 +1,413 @@
+NUNO Player
+
+A premium modern replica of the iPod mini from 2004. Keeps the classic Click Wheel UI, monochrome display, and focus on music playback, but delivers far more of the original device’s intended value by building around modern components.
+
+Built in 2025, a cheap microcontroller with 20 years of improvements to power management features can deliver:
+an even smoother Click Wheel scrolling UI, faster transitions between menus, and 1,000x+  larger audio libraries
+5-10x battery life on lossy audio + standby
+Lossless FLAC audio playback
+
+Would aim to appeal to the Apple nostalgic techies who yearn for the days when devices were unique and beautiful and they spent less time doom scrolling on their smartphone. Willing to pay a premium for a device that satisfies that nostalgia while making real advances with the technology — see Analogue Pocket, ModRetro.
+Software system breakdown
+Real-Time Operating System (FreeRTOS)
+Task Management
+Audio Playback (Highest priority)
+Double-buffered DMA transfers
+Buffer underrun prevention
+Format decoding (MP3, AAC, ALAC, FLAC, WAV)
+Gapless playback support
+UI Rendering (High priority)
+Click wheel input processing
+Menu rendering
+Smooth scrolling implementation
+Animation handling
+Database Operations (Medium priority)
+Search indexing
+Playlist management
+Background metadata scanning
+USB Communication (Medium priority)
+Mass storage device mode
+Custom protocol for sync app
+System Management (Low priority)
+Battery monitoring
+Thermal management
+Error logging
+ES9038Q2M DAC Management
+Configuration Profiles
+Normal Mode: Balanced power/performance
+High Performance: Maximum quality
+Power Saving: Extended battery life
+Real-time volume control
+Digital filter selection
+Hardware mute control
+DSD/PCM mode switching
+Clock source management
+Power Management
+State Machine
+Active Playback
+Full CPU speed
+DAC in selected profile
+Display active
+Menu Navigation
+Reduced CPU speed
+DAC in standby
+Display active
+Sleep Mode
+Minimum CPU speed
+DAC in power-down
+Display off
+Click wheel monitoring
+Deep Sleep
+CPU stopped
+All peripherals off
+RTC running
+Wake on button press
+Battery Management
+Capacity monitoring
+Health tracking
+Charge cycle counting
+Temperature monitoring
+Quick charge negotiation
+Storage & Database
+Filesystem
+FAT32 for compatibility
+Wear leveling aware
+Atomic operations for reliability
+Transaction logging
+Music Database (SQLite)
+Tables
+Songs
+Metadata (artist, album, title, etc.)
+File location
+Format-specific info
+Play count/rating
+Last played
+Artists
+Name
+Album count
+Track count
+Albums
+Title
+Artist reference
+Year
+Track count
+Playlists
+Name
+Song references
+Created/modified dates
+PlayHistory
+Song reference
+Timestamp
+Duration played
+Indices
+Artist name
+Album title
+Song title
+Filename
+Play count
+Companion Software
+Cross-platform (Mac/Windows/Linux)
+Features:
+Device Management (High Priority)
+Storage management
+Firmware updates
+Configuration backup/restore
+Battery health reporting
+Music Transfer (Medium Priority)
+Efficient differential sync
+Format conversion if needed
+Progress reporting
+Error recovery
+Music Library Management (Low Priority)
+Playlist creation/editing
+Smart playlist support
+Metadata editing
+Album artwork handling
+Communication Protocol
+Custom USB protocol
+Chunked transfers
+CRC verification
+Resume capability
+Other Classic iPod Features
+Games (Low Priority)
+Brick
+Music Quiz
+Parachute
+Solitaire
+Notes Reader (Low Priority)
+Calendar Display (Low Priority)
+Contacts Display (Low Priority)
+Hold Switch Functionality
+Battery Status Display 
+Development Tools
+Debug Console
+Performance metrics
+Battery statistics
+Error logging
+Audio buffer monitoring
+Test Suites
+Audio pipeline validation
+UI responsiveness testing
+Database performance
+Power consumption profiling
+Manufacturing Tools
+Factory test sequence
+Calibration utilities
+Initial firmware flashing
+Quality assurance checks
+PCB Hardware breakdown
+Processing
+STM32H743 microcontroller (or similar)
+480 MHz ARM Cortex-M7
+Hardware FPU for efficient audio processing
+DMA controllers for audio streaming
+Integrated USB 2.0 high-speed
+Low power modes for extended battery life
+Clocking
+Dual CCHD-575 Ultra-Low Phase Noise Oscillators
+22.5792 MHz for 44.1kHz family (CD-quality and multiples)
+24.576 MHz for 48kHz family (DAT/digital broadcast standards)
+32.768 kHz crystal for RTC/system timing
+Audio Chain
+ESS ES9038Q2M DAC/Headphone Amp
+Software-controlled digital volume
+Programmable digital filters
+Hardware mute control for pop/click suppression
+Supporting Audio Components
+Ultra-low noise LDO for analog power supply (e.g., TPS7A47)
+Dedicated ground plane for audio section
+Ferrite bead isolation between digital and analog grounds
+High-quality film coupling capacitors (e.g., WIMA or Panasonic)
+EMI suppression ferrites on audio outputs
+Gold-plated 3.5mm jack with detect
+Power Management
+Battery Management
+BQ25616 or similar for USB-C PD and quick charging
+Battery fuel gauge IC (e.g., BQ27Z561) for accurate capacity/health monitoring
+Protection circuitry for over-voltage/current/temperature
+Power Supplies
+Buck converter for 3.3V main rail
+Low noise LDO for 1.2V core
+Ultra-low noise 3.3V analog supply for DAC
+Level shifters for display interface
+Storage
+eMMC 5.1 flash storage module
+Multiple capacity options (512GB/1TB/2TB/4TB)
+High-speed HS400 mode support
+Managed NAND for better reliability
+Built-in wear leveling and bad block management
+Display Interface
+Sharp LCD or similar
+Ultra-low power consumption
+High contrast monochrome
+Wide viewing angle
+Extended temperature range
+Debug/Programming
+10-pin SWD header
+UART test points
+JTAG interface (optional)
+Test points for power rails and key signals
+Protection and Filtering
+USB-C interface protection
+ESD protection diodes
+Common mode chokes
+Overcurrent protection
+Power input protection
+Reverse polarity
+Overvoltage
+Thermal shutdown
+EMI/RFI filtering
+Common mode chokes on audio outputs
+Ferrite beads on power supplies
+Shield layers in PCB stackup
+PCB Requirements
+6-layer stack minimum
+Dedicated analog and digital ground planes
+Separate power planes
+Controlled impedance for high-speed signals
+High-quality substrate material (e.g., Isola IS410 or better)
+Impedance-controlled traces for USB and storage interface
+Guard rings around sensitive analog sections
+Mechanical:
+Mounting holes for case attachment
+Alignment features for display and click wheel
+Battery connector
+USB-C connector for charging/data
+Prototyping stack
+STM32H743 or comparable development board — 
+Software demo to adapt: https://www.freertos.org/Documentation/02-Kernel/03-Supported-devices/04-Demos/02-Supported-demos#demos-targeting-st-microelectronics-products
+Dev board: https://www.st.com/en/evaluation-tools/stm32h745i-disco.html
+Sharp Microelectronics LCD — LS013B7DH03
+ES9038Q2M DAC evaluation board
+Touch sensor breakout boards for Click Wheel prototyping
+USB-C PD development board
+Battery management development board
+Launch Strategy
+Minimum viable hype site with two products for sale:
+"We Ball Edition" ($1,499)
+Limited run of 200 units
+Premium packaging with "1 of X" numbering
+Highest storage tier (4TB)
+Special anodized finish or exclusive colorway
+Early access to companion software
+Behind the scenes development updates
+Community Discord/forum access
+Direct line to founders for feedback
+"Behind the Scenes Experience" ($100)
+Build community and generate additional revenue
+Detailed technical deep-dives into:
+PCB design iterations
+Click wheel reverse engineering
+Software development and refinement
+Audio quality measurements/optimization
+Manufacturing challenges
+Access to CAD files, schematics once the product ships
+Could evolve into a valuable resource for other hardware creators
+Marketing angles:
+“A million songs in your pocket”
+“The iconic design you remember. Capacity you couldn’t imagine.”
+“Every album. Every playlist. Every B-side. All offline.”
+
+Post-Launch Standard Tiers:
+$499 - 512GB
+$549 - 1TB
+$699 - 2TB
+$849 - 4TB
+
+Economics
+Bill of Materials
+BOM estimate for key components (per unit):
+STM32H743 or equivalent: $12-15
+ESS ES9038Q2M DAC/Amp: $15-18
+Dual CCHD-575 oscillators: $8-10
+Power Management ICs (BQ25616 + BQ27Z561): $8-10
+SD card storage (512GB baseline, 4TB max): $35-200
+Display (Sharp memory LCD): $8-10
+Battery (high quality with protection): $8-10
+Custom capacitive click wheel assembly: $15-20
+Aluminum enclosure (custom machined): $25-35
+6-layer PCB: $8-12
+Passive components (high quality audio): $15-18
+Connectors (USB-C, audio, debug): $8-10 
+Total BOM: ~$165-378 per unit
+For a batch of 200 ("We Ball Edition") at $1,499 price:
+Per unit costs: $495.50
+Components: $378 per unit (high end of ranges)
+Assembly labor (2 hrs × $35/hr): $70
+Testing labor (0.5 hrs × $35/hr): $17.50
+Premium packaging: $10
+Fixed costs: $26,000 (130 per unit)
+PCB design and validation: $2,000
+Tooling for enclosure: $4,500
+Assembly jigs/tools: $1,500
+Test fixtures/equipment: $1,000
+EMC/FCC testing:
+Pre-compliance Testing (~$5,000)
+Formal Testing & Certification (~$12,000)
+Full FCC test suite for unintentional radiators
+Conducted emissions testing
+Radiated emissions testing
+Test report generation
+FCC ID registration and documentation
+Realistic additional NRE beyond favors for the above?
+This goes up substantially if custom Click Wheel replica vs using old reclaimed components. Worst case scenario:
+Engineering time: $20,000-40,000
+Tooling/molds: $10,000-15,000
+Additional prototyping: $5,000-10,000
+First batch total costs: $95,100
+First batch revenue: $299,800
+Assembly
+Initial Prep & QC
+Test PCB functionality (basic power-up, programming test)
+Visual inspection of aluminum enclosure
+Clean enclosure and components
+Sort/organize all components for assembly line style work
+Main Assembly Steps
+Install display assembly into front housing
+Likely needs alignment jig
+Install any required gaskets/cushioning
+Secure display cables
+Mount PCB into housing
+Install any thermal pads/EMI shields if needed
+Secure with proper screws (likely need torque control)
+Route cables carefully
+Click wheel installation
+Clean contact surfaces
+Apply any required adhesive
+Align precisely (will need alignment jig)
+Route click wheel cable to PCB
+Secure connections
+Battery installation
+Install any required insulation
+Connect battery to PCB
+Secure battery (adhesive/bracket)
+Verify connections
+Final housing assembly
+Verify no pinched cables
+Install any gaskets/seals
+Testing & QC
+Power-on test
+Display test
+Click wheel function test
+Audio quality test
+Need reference IEMs
+Test various audio files
+Check for noise/interference
+Battery charging test
+Final cosmetic inspection
+Equipment Needed:
+ESD-safe workstation
+Torque screwdrivers
+Alignment jigs (custom made)
+Testing equipment
+Audio analyzer or at least quality audio testing setup
+Power supply/battery tester
+Programming jig for firmware
+Proper lighting and magnification
+Clean workspace with proper organization
+Per-unit assembly time breakdown:
+Initial QC: 5-10 mins
+Main assembly: 30-45 mins
+Testing: 15-20 mins
+Final QC: 5-10 mins
+Total time per unit: ~1-1.5 hours
+Premium Packaging exploration
+For maybe $25-30 per unit (vs. the $10 currently budgeted), we could create something much more special:
+Outer Box
+Soft-touch coated rigid cardboard in matte black
+Silver/metallic foil debossing for logo and details
+Magnetic closure instead of traditional tabs
+Slightly oversized compared to original for more dramatic unboxing
+Internal Structure
+Two-piece design with a lift-out tray
+Custom-molded EVA foam inserts (more premium than plastic)
+Separate accessories compartment that reveals itself naturally
+Cable management built into the design
+Materials & Finishes
+Textured paper wrapping instead of basic cardboard
+Micro-suede or similar soft-touch interior lining
+Anti-fingerprint coating on glossy surfaces
+Color-matched to the device itself
+Documentation
+Premium weight paper for manuals
+Custom printed thank-you card
+Brief story about the project
+Individual unit number printed on a small card
+
+Battery Exploration
+
+The original iPod mini used a 3.7V Li-ion battery rated at approximately 630mAh. 
+For a modern device in 2025 using the same aluminum chassis dimensions (3.6 x 2.0 x 0.5 inches / 91.44 x 50.8 x 12.7mm):
+Battery Technology Improvements:
+Modern Li-ion cells have roughly 2-2.5x the energy density compared to 2004
+Better packaging efficiency
+More sophisticated protection circuits that take less space
+Space Optimization:
+Modern PCBs can be more densely packed
+Components are generally smaller
+Multi-layer PCB technology is better
+We could reasonably fit a 1500-1800mAh battery while maintaining the original form factor. This assumes:
+Main PCB taking ~30-35% of internal volume
+Battery taking ~45-50% of internal volume
+Remaining space for display, click wheel, connectors, and structural elements
+

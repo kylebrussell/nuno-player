@@ -1,0 +1,10 @@
+#ifndef MENU_ITEMS_H
+#define MENU_ITEMS_H
+
+#define NUM_MAIN_MENU_ITEMS 4
+#define NUM_MUSIC_MENU_ITEMS 4
+
+extern const char* MAIN_MENU_ITEMS[NUM_MAIN_MENU_ITEMS];
+extern const char* MUSIC_MENU_ITEMS[NUM_MUSIC_MENU_ITEMS];
+
+#endif // MENU_ITEMS_H
