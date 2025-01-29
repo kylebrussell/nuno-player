@@ -1,24 +1,116 @@
-src/platform/dma.c:
-- Implement DMA for audio streaming
-- Add circular buffer support
-- Add interrupt handling
-
-src/drivers/es9038q2m/es9038q2m.h:
-- Define register map
-- Define configuration structures
-- Add function prototypes for all DAC operations
-
-src/core/audio/audio_buffer.h:
-- Define buffer structures
-- Add buffer management API
-- Include underrun protection
-
 tests/platform/platform_tests.c:
 - Add I2C tests
 - Add GPIO tests
 - Add DMA tests
+- Buffer management tests
+- Add unit tests for DAC operations
 
 tests/drivers/es9038q2m_tests.c:
 - Add initialization tests
 - Add configuration tests
 - Add volume control tests
+
+# Core Implementation Tasks
+
+src/core/audio/audio_buffer.c:
+- Implement double-buffered DMA audio pipeline
+- Populate the circular buffer with audio data from sources like the filesystem
+- Add buffer underrun detection
+- Implement buffer status monitoring
+- Add buffer preload mechanism
+- Implement gapless playback support
+
+src/drivers/es9038q2m/es9038q2m.c:
+- Implement DAC initialization sequence
+- Add volume control functions
+- Implement power management states
+- Add digital filter selection
+- Implement DSD/PCM mode switching
+- Add clock source management
+
+src/core/audio/format_decoder.h:
+- Define decoder interface for audio formats
+- Add format detection functions
+- Define buffer requirements per format
+- Create error handling structures
+
+src/core/audio/format_decoder.c:
+- Implement MP3 decoder integration
+- Add FLAC decoder support
+- Implement AAC decoder
+- Add ALAC decoder support
+- Add WAV decoder
+
+src/core/database/db_init.c:
+- Implement SQLite database initialization
+- Create tables for songs, artists, albums
+- Add indices for fast searching
+- Implement playlist management
+- Add play history tracking
+
+src/platform/power.h:
+- Define power states
+- Add battery monitoring interface
+- Define charging state management
+- Add thermal monitoring interface
+
+src/platform/power.c:
+- Implement power state transitions
+- Add battery level monitoring
+- Implement charging control
+- Add thermal management
+- Implement deep sleep mode
+
+src/platform/usb.c:
+- Implement mass storage device mode
+- Add custom protocol handlers
+- Implement sync protocol
+- Add error recovery mechanisms
+
+src/ui/menu_renderer.c:
+- Implement smooth scrolling
+- Add animation framework
+- Implement menu transitions
+- Add progress bar rendering
+- Implement battery indicator
+
+tests/core/audio_tests.c:
+- Add audio pipeline tests
+- Test buffer underrun handling
+- Add format decoder tests
+- Test gapless playback
+- Add performance benchmarks
+
+tests/ui/menu_tests.c:
+- Test scroll performance
+- Add animation timing tests
+- Test menu navigation
+- Add stress tests for UI
+- Test click wheel responsiveness
+
+web-simulator/wasm-bridge.c:
+- Add audio playback simulation
+- Implement UI state management
+- Add click wheel input handling
+- Implement menu rendering
+- Add battery simulation
+
+# Focus Areas by Priority
+
+High Priority:
+- Audio pipeline implementation
+- Click wheel input processing
+- Basic menu navigation
+- DAC driver implementation
+
+Medium Priority:
+- Power management
+- Database initialization
+- Format decoders
+- USB communication
+
+Low Priority:
+- Web simulator
+- Advanced UI animations
+- Extended playback features
+- Additional audio format support
