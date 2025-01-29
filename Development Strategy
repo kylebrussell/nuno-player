@@ -5,7 +5,6 @@ For each subsystem:
     Create simple test harness
     Add hardware abstraction layer
     Implement real hardware drivers
-    Add to web simulator last
 
 Core Systems Development
 
@@ -28,13 +27,6 @@ Display output
 
 
 Focus on driver development
-
-Web Simulator
-
-    Create a C API that wraps your core logic
-    Use Emscripten to expose just these APIs to JavaScript
-    Build React simulator against this API
-
 
 Priority Order for Implementation:
 Audio System

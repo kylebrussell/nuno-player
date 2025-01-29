@@ -88,12 +88,6 @@ tests/ui/menu_tests.c:
 - Add stress tests for UI
 - Test click wheel responsiveness
 
-web-simulator/wasm-bridge.c:
-- Add audio playback simulation
-- Implement UI state management
-- Add click wheel input handling
-- Implement menu rendering
-- Add battery simulation
 
 # Focus Areas by Priority
 
@@ -110,7 +104,6 @@ Medium Priority:
 - USB communication
 
 Low Priority:
-- Web simulator
 - Advanced UI animations
 - Extended playback features
 - Additional audio format support
