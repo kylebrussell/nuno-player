@@ -35,6 +35,18 @@ add_library(platform
     # Add other platform files as needed
 )
 
+option(USE_MOCK_HAL "Use mock HAL implementation" ON)
+
+if(USE_MOCK_HAL)
+    add_library(STM32H7xx_HAL_Mock stm32h7xx_hal_mock.c)
+    target_include_directories(STM32H7xx_HAL_Mock PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    # Link the mock HAL library
+    target_link_libraries(nuno-player STM32H7xx_HAL_Mock)
+else()
+    # Link the official HAL library
+    target_link_libraries(nuno-player STM32H7xx_HAL_Driver)
+endif()
+
 # Main executable
 add_executable(nuno-player
     src/main.c

@@ -1,5 +1,5 @@
 #include "gpio.h"
-#include "stm32h7xx_hal.h"
+#include "nuno/stm32h7xx_hal.h"
 
 // DAC Control Lines Configuration
 #define DAC_CS_PIN          GPIO_PIN_4
