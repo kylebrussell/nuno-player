@@ -1,5 +1,4 @@
 tests/platform/platform_tests.c:
-- Add I2C tests
 - Add GPIO tests
 - Add DMA tests
 - Buffer management tests
@@ -9,8 +8,6 @@ tests/drivers/es9038q2m_tests.c:
 - Add initialization tests
 - Add configuration tests
 - Add volume control tests
-
-# Core Implementation Tasks
 
 src/core/audio/audio_buffer.c:
 - Implement double-buffered DMA audio pipeline

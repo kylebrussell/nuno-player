@@ -1,0 +1,24 @@
+:cmock:
+  :mock_prefix: mock_
+  :plugins:
+    - :callback
+    - :ignore
+    - :expect_any_args
+    - :array
+    - :return_thru_ptr
+  :treat_as:
+    uint8:    HEX8
+    uint16:   HEX16
+    uint32:   UINT32
+    int8:     INT8
+    bool:     UINT8
+  :includes:
+    - <stdint.h>
+    - <stdbool.h>
+  :treat_externs: :include
+  :weak: __attribute__((weak))
+  :verbosity: 3
+  :strippables:
+    - EXTERN_C
+    - extern
+  :unity_helper_path: unity_helper.h
