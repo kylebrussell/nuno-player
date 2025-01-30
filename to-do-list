@@ -1,13 +1,11 @@
-tests/platform/platform_tests.c:
-- Add GPIO tests
-- Add DMA tests
-- Buffer management tests
-- Add unit tests for DAC operations
-
-tests/drivers/es9038q2m_tests.c:
-- Add initialization tests
-- Add configuration tests
-- Add volume control tests
+src/drivers/es9038q2m/es9038q2m.c:
+- Implement DAC initialization sequence
+- Add register configuration functions
+- Add volume control functions
+- Implement power management states
+- Add digital filter selection
+- Implement DSD/PCM mode switching
+- Add clock source management
 
 src/core/audio/audio_buffer.c:
 - Implement double-buffered DMA audio pipeline
@@ -17,13 +15,50 @@ src/core/audio/audio_buffer.c:
 - Add buffer preload mechanism
 - Implement gapless playback support
 
-src/drivers/es9038q2m/es9038q2m.c:
-- Implement DAC initialization sequence
-- Add volume control functions
-- Implement power management states
-- Add digital filter selection
-- Implement DSD/PCM mode switching
-- Add clock source management
+src/ui/menu_renderer.c:
+- Implement smooth scrolling
+- Add animation framework
+- Implement menu transitions
+- Add progress bar rendering
+- Implement battery indicator
+
+
+tests/platform/platform_tests.c:
+- Add GPIO tests
+- Add DMA tests
+- Buffer management tests
+- Add unit tests for DAC operations
+
+Add to project:
+- git submodule add https://github.com/ARM-software/CMSIS_5.git external/CMSIS
+- git submodule add https://github.com/STMicroelectronics/stm32h7xx_hal_driver.git external/STM32H7xx_HAL_Driver
+- git submodule add https://github.com/FreeRTOS/FreeRTOS-Kernel.git external/FreeRTOS
+
+
+src/core/audio/audio_pipeline.c:
+- Implement audio data flow management
+- Integrate with buffer management and DAC driver
+- Add buffer handling
+- Create sample rate conversion interface
+- Add format conversion utilities
+- Implement pipeline state management
+- Implement basic playback functionalities: play, pause, skip, and stop
+
+src/main.c:
+- Create main application entry point
+- Initialize system clocks
+- Configure peripherals
+- Start FreeRTOS scheduler
+- Initialize audio subsystem
+- Set up error handling
+
+tests/mocks/stm32h7xx_hal_mock.c:
+- Create mock implementation of STM32 HAL functions
+- Add mock GPIO functions
+- Implement mock I2C interface
+- Add mock DMA functions
+- Create mock timer functions
+- Add mock interrupt handling
 
 src/core/audio/format_decoder.h:
 - Define decoder interface for audio formats
@@ -63,13 +98,6 @@ src/platform/usb.c:
 - Add custom protocol handlers
 - Implement sync protocol
 - Add error recovery mechanisms
-
-src/ui/menu_renderer.c:
-- Implement smooth scrolling
-- Add animation framework
-- Implement menu transitions
-- Add progress bar rendering
-- Implement battery indicator
 
 tests/core/audio_tests.c:
 - Add audio pipeline tests
