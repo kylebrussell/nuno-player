@@ -1,19 +1,12 @@
-src/drivers/es9038q2m/es9038q2m.c:
-- Implement DAC initialization sequence
-- Add register configuration functions
-- Add volume control functions
-- Implement power management states
-- Add digital filter selection
-- Implement DSD/PCM mode switching
-- Add clock source management
-
 src/core/audio/audio_buffer.c:
-- Implement double-buffered DMA audio pipeline
-- Populate the circular buffer with audio data from sources like the filesystem
-- Add buffer underrun detection
-- Implement buffer status monitoring
-- Add buffer preload mechanism
-- Implement gapless playback support
+- Implement RequestMoreData() to handle filesystem reads
+- Add error reporting mechanism for buffer underruns
+- Add buffer statistics tracking (underruns, successful transitions)
+- Implement configurable buffer thresholds
+- Add power-saving mode support
+- Add support for variable sample rates
+- Add support for different bit depths
+- Implement buffer flush mechanism for seeking
 
 src/ui/menu_renderer.c:
 - Implement smooth scrolling
@@ -21,7 +14,6 @@ src/ui/menu_renderer.c:
 - Implement menu transitions
 - Add progress bar rendering
 - Implement battery indicator
-
 
 tests/platform/platform_tests.c:
 - Add GPIO tests
