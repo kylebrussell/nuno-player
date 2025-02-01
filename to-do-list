@@ -37,17 +37,12 @@ tests/mocks/stm32h7xx_hal_mock.c:
 - Add mock interrupt handling
 
 src/core/audio/format_decoder.h:
-- Define decoder interface for audio formats
-- Add format detection functions
+- Define decoder interface for MP3 audio format
 - Define buffer requirements per format
 - Create error handling structures
 
 src/core/audio/format_decoder.c:
 - Implement MP3 decoder integration
-- Add FLAC decoder support
-- Implement AAC decoder
-- Add ALAC decoder support
-- Add WAV decoder
 
 src/core/database/db_init.c:
 - Implement SQLite database initialization

@@ -1,0 +1,10 @@
+To make the simulator run:
+
+Navigate to the root directory of the project : nuno-player
+
+Then: 
+
+rm -rf build
+mkdir build && cd build
+cmake .. -DBUILD_TESTS=ON
+make nuno-sim
