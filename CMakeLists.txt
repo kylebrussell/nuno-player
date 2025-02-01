@@ -10,14 +10,20 @@ project(nuno-player C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# Option for testing
+# Options
 option(BUILD_TESTS "Build test suite" ON)
 option(USE_MOCK_HAL "Use mock HAL implementation" ON)
+option(BUILD_SIM "Build simulation target with SDL" ON)
 
-# Dependencies
+# Dependencies for embedded target
 find_package(CMSIS REQUIRED)
 find_package(STM32H7xx_HAL_Driver REQUIRED)
 find_package(FreeRTOS REQUIRED)
+
+# For simulation, add SDL2 dependency (installed via brew)
+if(BUILD_SIM)
+    find_package(SDL2 REQUIRED)
+endif()
 
 # Include directories
 include_directories(
@@ -25,25 +31,31 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-# Source files
+# -------------------------------------------------------------------
+# Libraries and Executable Targets
+# -------------------------------------------------------------------
+
+# Drivers library
 add_library(drivers
     src/drivers/es9038q2m/es9038q2m.c
-    # Add other drivers as they're created
+    # Add other driver source files as they are created
 )
 
+# Core library (e.g., audio pipeline, UI, etc.)
 add_library(core
     src/core/audio/audio_pipeline.c
-    # Add other core components as they're created
+    # Add other core components as they are created
 )
 
+# Platform library (I2C, GPIO, DMA, etc.)
 add_library(platform
     src/platform/i2c.c
     src/platform/gpio.c
     src/platform/dma.c
-    # Add other platform files as needed
+    # Add other platform source files as needed
 )
 
-# Main executable
+# Main executable for the embedded target
 add_executable(nuno-player
     src/main.c
 )
@@ -61,15 +73,38 @@ else()
     target_link_libraries(nuno-player STM32H7xx_HAL_Driver)
 endif()
 
+# Simulation executable using SDL mock display (for UI iteration without hardware)
+if(BUILD_SIM)
+    add_executable(nuno-sim
+         src/platform/sim/main_ui_test.c
+         src/platform/sim/sdl_mock_display.c
+    )
+
+    target_include_directories(nuno-sim PRIVATE
+         ${CMAKE_CURRENT_SOURCE_DIR}/include
+         ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+
+    target_link_libraries(nuno-sim
+         drivers
+         core
+         platform
+         freertos_kernel
+         SDL2::SDL2
+    )
+endif()
+
+# -------------------------------------------------------------------
 # Test Configuration
+# -------------------------------------------------------------------
 if(BUILD_TESTS)
-    # Add test dependencies
+    # Include test dependencies (assumes cmake/test_dependencies.cmake exists)
     include(cmake/test_dependencies.cmake)
     
-    # Generate mocks for platform interface
+    # Generate mocks for the platform interface
     generate_mock(${CMAKE_CURRENT_SOURCE_DIR}/include/nuno/platform.h)
     
-    # Add mock libraries
+    # Add mock libraries for testing
     add_library(platform_mock
         tests/mocks/mock_platform.c
         tests/mocks/stm32h7xx_hal_mock.c
@@ -88,7 +123,7 @@ if(BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/external/cmock/src
     )
 
-    # ES9038Q2M DAC Tests
+    # ES9038Q2M DAC Tests executable
     add_executable(es9038q2m_tests
         tests/drivers/es9038q2m_tests.c
     )
@@ -100,7 +135,7 @@ if(BUILD_TESTS)
         drivers
     )
 
-    # Platform Tests
+    # Platform Tests executable
     add_executable(platform_tests
         tests/platform/platform_tests.c
     )
@@ -110,11 +145,11 @@ if(BUILD_TESTS)
         unity
     )
 
-    # Register tests
+    # Register tests with CTest
     add_test(NAME ES9038Q2M_Tests COMMAND es9038q2m_tests)
     add_test(NAME Platform_Tests COMMAND platform_tests)
 
-    # Test include directories
+    # Test-specific include directories
     target_include_directories(es9038q2m_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/drivers/es9038q2m
     )
@@ -124,7 +159,9 @@ if(BUILD_TESTS)
     )
 endif()
 
+# -------------------------------------------------------------------
 # Installation
+# -------------------------------------------------------------------
 install(TARGETS nuno-player
     RUNTIME DESTINATION bin
 )

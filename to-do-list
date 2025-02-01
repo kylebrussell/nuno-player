@@ -8,6 +8,15 @@ src/core/audio/audio_buffer.c:
 - Add support for different bit depths
 - Implement buffer flush mechanism for seeking
 
+src/core/audio/audio_pipeline.c:
+- Implement audio data flow management
+- Integrate with buffer management and DAC driver
+- Add buffer handling
+- Create sample rate conversion interface
+- Add format conversion utilities
+- Implement pipeline state management
+- Implement basic playback functionalities: play, pause, skip, and stop
+
 tests/platform/platform_tests.c:
 - Add GPIO tests
 - Add DMA tests
@@ -19,15 +28,6 @@ Add to project:
 - git submodule add https://github.com/STMicroelectronics/stm32h7xx_hal_driver.git external/STM32H7xx_HAL_Driver
 - git submodule add https://github.com/FreeRTOS/FreeRTOS-Kernel.git external/FreeRTOS
 
-
-src/core/audio/audio_pipeline.c:
-- Implement audio data flow management
-- Integrate with buffer management and DAC driver
-- Add buffer handling
-- Create sample rate conversion interface
-- Add format conversion utilities
-- Implement pipeline state management
-- Implement basic playback functionalities: play, pause, skip, and stop
 
 src/main.c:
 - Create main application entry point
