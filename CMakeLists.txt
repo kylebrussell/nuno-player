@@ -44,8 +44,10 @@ add_library(drivers
     src/drivers/es9038q2m/es9038q2m.c
 )
 
-# No core sources yet—make it an INTERFACE target.
-add_library(core INTERFACE)
+add_library(core
+    src/core/audio/audio_pipeline.c
+    src/core/audio/audio_buffer.c
+)
 
 add_library(platform
     src/platform/i2c.c
