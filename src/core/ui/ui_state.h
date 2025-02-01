@@ -8,6 +8,20 @@
 #define MAX_TITLE_LENGTH 32
 #define MAX_ITEM_LENGTH 32
 
+// Display constants
+#define DISPLAY_WIDTH 160
+#define DISPLAY_HEIGHT 128
+#define ITEM_HEIGHT 16
+#define TEXT_HEIGHT 12
+#define TEXT_MARGIN 4
+
+// Colors (for monochrome display these translate to different patterns)
+#define NORMAL_TEXT_COLOR 1
+#define SELECTED_TEXT_COLOR 0
+#define HIGHLIGHT_COLOR 1
+#define TITLE_TEXT_COLOR 1
+#define PROGRESS_COLOR 1
+
 typedef enum {
     MENU_MAIN,
     MENU_MUSIC,
@@ -34,6 +48,7 @@ typedef struct Menu {
 typedef struct UIState {
     Menu currentMenu;
     MenuType currentMenuType;
+    uint8_t batteryLevel;  // Battery percentage 0-100
     bool isPlaying;
     uint8_t volume;
     uint16_t currentTrackTime;  // in seconds
