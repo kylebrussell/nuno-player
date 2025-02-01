@@ -8,13 +8,6 @@ src/core/audio/audio_buffer.c:
 - Add support for different bit depths
 - Implement buffer flush mechanism for seeking
 
-src/ui/menu_renderer.c:
-- Implement smooth scrolling
-- Add animation framework
-- Implement menu transitions
-- Add progress bar rendering
-- Implement battery indicator
-
 tests/platform/platform_tests.c:
 - Add GPIO tests
 - Add DMA tests
