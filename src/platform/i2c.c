@@ -1,5 +1,5 @@
 #include "nuno/platform.h"
-#include "stm32h7xx_hal.h"
+#include "nuno/stm32h7xx_hal.h"
 
 static I2C_HandleTypeDef hi2c1;
 

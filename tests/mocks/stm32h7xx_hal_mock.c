@@ -75,6 +75,21 @@ void HAL_Delay(uint32_t Delay) {
     printf("HAL_Delay called for %u ms\n", Delay);
 }
 
+// Add after the existing GPIO functions:
+
+void HAL_NVIC_SetPriority(IRQn_Type IRQn, uint32_t PreemptPriority, uint32_t SubPriority) {
+    printf("HAL_NVIC_SetPriority called for IRQn: %d, Preempt: %lu, Sub: %lu\n", 
+           IRQn, PreemptPriority, SubPriority);
+}
+
+void HAL_NVIC_EnableIRQ(IRQn_Type IRQn) {
+    printf("HAL_NVIC_EnableIRQ called for IRQn: %d\n", IRQn);
+}
+
+void HAL_GPIO_EXTI_IRQHandler(uint16_t GPIO_Pin) {
+    printf("HAL_GPIO_EXTI_IRQHandler called for Pin: %u\n", GPIO_Pin);
+}
+
 // I2C Functions
 HAL_StatusTypeDef HAL_I2C_Init(I2C_HandleTypeDef *hi2c) {
     printf("HAL_I2C_Init called\n");

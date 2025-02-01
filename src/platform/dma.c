@@ -1,6 +1,6 @@
-#include "platform.h"
-#include "stm32h7xx_hal.h"
-#include "audio_buffer.h"
+#include "nuno/platform.h"
+#include "nuno/stm32h7xx_hal.h"
+#include "nuno/audio_buffer.h"
 #include <stdbool.h>
 
 // DMA Handle
@@ -10,15 +10,6 @@ DMA_HandleTypeDef hdma_audio;
 #define AUDIO_BUFFER_SIZE 4096
 uint16_t audio_buffer[AUDIO_BUFFER_SIZE];
 volatile bool dma_transfer_complete = false;
-
-// Circular Buffer Structure
-typedef struct {
-    uint16_t *buffer;
-    size_t size;
-    size_t head;
-    size_t tail;
-    bool is_full;
-} CircularBuffer;
 
 static CircularBuffer circular_buffer;
 
