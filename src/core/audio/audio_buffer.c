@@ -1,5 +1,7 @@
-#include "audio_buffer.h"
-#include "platform.h"
+#include "nuno/audio_buffer.h"
+#include "nuno/platform.h"
+#include "nuno/filesystem.h"
+#include "nuno/audio_pipeline.h"
 #include <stdbool.h>
 #include <string.h>
 
@@ -149,8 +151,45 @@ void AudioBuffer_HandleUnderrun(void) {
 
 // Request more data from source
 static void RequestMoreData(void) {
-    // Trigger async data fetch from filesystem/source
-    // Implementation depends on source interface
+    // Only request more data if we have space available
+    if (circular_buffer.is_full) {
+        return;
+    }
+
+    // Calculate available space
+    size_t available_space;
+    if (circular_buffer.head >= circular_buffer.tail) {
+        available_space = circular_buffer.size - (circular_buffer.head - circular_buffer.tail);
+    } else {
+        available_space = circular_buffer.tail - circular_buffer.head;
+    }
+
+    // Only trigger read if we have enough space
+    if (available_space >= BUFFER_THRESHOLD) {
+        // Get the next chunk of audio data from filesystem
+        uint16_t temp_buffer[BUFFER_THRESHOLD];
+        size_t bytes_read = FileSystem_ReadAudioData(
+            temp_buffer,
+            BUFFER_THRESHOLD * sizeof(uint16_t)
+        );
+
+        // Convert bytes read to number of samples
+        size_t samples_read = bytes_read / sizeof(uint16_t);
+
+        // Add samples to circular buffer
+        for (size_t i = 0; i < samples_read; i++) {
+            if (!CircularBuffer_Add(&circular_buffer, temp_buffer[i])) {
+                // Buffer is full
+                break;
+            }
+        }
+
+        // If we couldn't read enough data, we may be at end of file
+        if (samples_read < BUFFER_THRESHOLD) {
+            // Notify audio pipeline about end of file
+            AudioPipeline_HandleEndOfFile();
+        }
+    }
 }
 
 // Handle gapless playback transition

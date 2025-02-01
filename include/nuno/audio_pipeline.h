@@ -66,4 +66,14 @@ PipelineState AudioPipeline_GetState(void);
  */
 void AudioPipeline_HandleUnderrun(void);
 
+/**
+ * @brief Handle end of file condition
+ * 
+ * This function is called by the audio buffer system when it detects
+ * the end of the current audio file. It should handle transitioning
+ * to the next track if available, or stopping playback if at the end
+ * of the playlist.
+ */
+void AudioPipeline_HandleEndOfFile(void);
+
 #endif /* AUDIO_PIPELINE_H */

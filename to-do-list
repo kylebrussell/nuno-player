@@ -1,5 +1,4 @@
 src/core/audio/audio_buffer.c:
-- Implement RequestMoreData() to handle filesystem reads
 - Add error reporting mechanism for buffer underruns
 - Add buffer statistics tracking (underruns, successful transitions)
 - Implement configurable buffer thresholds
@@ -7,6 +6,10 @@ src/core/audio/audio_buffer.c:
 - Add support for variable sample rates
 - Add support for different bit depths
 - Implement buffer flush mechanism for seeking
+- Add error handling for FileSystem_ReadAudioData failures
+- Implement buffer statistics for filesystem read operations
+- Add configurable read chunk sizes
+- Implement retry logic for failed reads
 
 tests/platform/platform_tests.c:
 - Add GPIO tests
@@ -35,6 +38,32 @@ tests/mocks/stm32h7xx_hal_mock.c:
 - Add mock DMA functions
 - Create mock timer functions
 - Add mock interrupt handling
+
+src/platform/filesystem.c:
+- Implement FileSystem_ReadAudioData() for reading audio chunks
+- Add file handle management for current audio file
+- Implement FileSystem_Seek() for track seeking
+- Add FileSystem_OpenFile() with error handling
+- Add FileSystem_CloseFile() cleanup
+- Add support for different audio file formats
+- Implement basic file caching for better performance
+- Add error reporting mechanism
+
+src/core/audio/audio_pipeline.c:
+- Implement AudioPipeline_HandleEndOfFile()
+- Add smooth transition logic between tracks
+- Implement end-of-playlist handling
+- Add callbacks for playback state changes
+
+tests/core/filesystem_tests.c:
+- Create test suite for filesystem operations
+- Add mock filesystem for testing
+- Test error conditions and recovery
+- Test partial reads and EOF conditions
+- Add performance benchmarks for read operations
+- Test file format detection
+- Test seek operations
+- Add stress tests for concurrent operations
 
 src/core/audio/format_decoder.h:
 - Define decoder interface for MP3 audio format
