@@ -105,6 +105,22 @@ Album title
 Song title
 Filename
 Play count
+Development Tools
+Debug Console
+Performance metrics
+Battery statistics
+Error logging
+Audio buffer monitoring
+Test Suites
+Audio pipeline validation
+UI responsiveness testing
+Database performance
+Power consumption profiling
+Manufacturing Tools
+Factory test sequence
+Calibration utilities
+Initial firmware flashing
+Quality assurance checks
 Companion Software
 Cross-platform (Mac/Windows/Linux)
 Features:
@@ -139,25 +155,9 @@ Calendar Display (Low Priority)
 Contacts Display (Low Priority)
 Hold Switch Functionality
 Battery Status Display 
-Development Tools
-Debug Console
-Performance metrics
-Battery statistics
-Error logging
-Audio buffer monitoring
-Test Suites
-Audio pipeline validation
-UI responsiveness testing
-Database performance
-Power consumption profiling
-Manufacturing Tools
-Factory test sequence
-Calibration utilities
-Initial firmware flashing
-Quality assurance checks
 PCB Hardware breakdown
 Processing
-STM32H743 microcontroller (or similar)
+STM32H743 microcontroller
 480 MHz ARM Cortex-M7
 Hardware FPU for efficient audio processing
 DMA controllers for audio streaming
@@ -191,10 +191,8 @@ Low noise LDO for 1.2V core
 Ultra-low noise 3.3V analog supply for DAC
 Level shifters for display interface
 Storage
-eMMC 5.1 flash storage module
+SD-card based internal storage
 Multiple capacity options (512GB/1TB/2TB/4TB)
-High-speed HS400 mode support
-Managed NAND for better reliability
 Built-in wear leveling and bad block management
 Display Interface
 Sharp LCD or similar
@@ -249,7 +247,6 @@ Limited run of 200 units
 Premium packaging with "1 of X" numbering
 Highest storage tier (4TB)
 Special anodized finish or exclusive colorway
-Early access to companion software
 Behind the scenes development updates
 Community Discord/forum access
 Direct line to founders for feedback
@@ -267,13 +264,11 @@ Marketing angles:
 “A million songs in your pocket”
 “The iconic design you remember. Capacity you couldn’t imagine.”
 “Every album. Every playlist. Every B-side. All offline.”
-
 Post-Launch Standard Tiers:
 $499 - 512GB
 $549 - 1TB
 $699 - 2TB
 $849 - 4TB
-
 Economics
 Bill of Materials
 BOM estimate for key components (per unit):
@@ -410,4 +405,3 @@ We could reasonably fit a 1500-1800mAh battery while maintaining the original fo
 Main PCB taking ~30-35% of internal volume
 Battery taking ~45-50% of internal volume
 Remaining space for display, click wheel, connectors, and structural elements
-
