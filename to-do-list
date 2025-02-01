@@ -1,27 +1,41 @@
+src/platform/filesystem.c:
+- Implement FileSystem_ReadAudioData() for reading audio chunks
+- Add FileSystem_OpenFile() with error handling
+- Add file handle management for current audio file
+- Add FileSystem_CloseFile() cleanup
+- Implement FileSystem_Seek() for track seeking
+- Add error reporting mechanism
+- Add support for different audio file formats
+- Implement basic file caching for better performance
+
 src/core/audio/audio_buffer.c:
+- Add error handling for FileSystem_ReadAudioData failures
+- Implement retry logic for failed reads
+- Add configurable read chunk sizes
 - Add error reporting mechanism for buffer underruns
+- Implement buffer statistics for filesystem read operations
 - Add buffer statistics tracking (underruns, successful transitions)
 - Implement configurable buffer thresholds
-- Add power-saving mode support
+- Implement buffer flush mechanism for seeking
 - Add support for variable sample rates
 - Add support for different bit depths
-- Implement buffer flush mechanism for seeking
-- Add error handling for FileSystem_ReadAudioData failures
-- Implement buffer statistics for filesystem read operations
-- Add configurable read chunk sizes
-- Implement retry logic for failed reads
+- Add power-saving mode support
 
-tests/platform/platform_tests.c:
-- Add GPIO tests
-- Add DMA tests
-- Buffer management tests
-- Add unit tests for DAC operations
+tests/core/filesystem_tests.c:
+- Create test suite for filesystem operations
+- Add mock filesystem for testing
+- Test error conditions and recovery
+- Test partial reads and EOF conditions
+- Test seek operations
+- Test file format detection
+- Add stress tests for concurrent operations
+- Add performance benchmarks for read operations
 
-Add to project:
-- git submodule add https://github.com/ARM-software/CMSIS_5.git external/CMSIS
-- git submodule add https://github.com/STMicroelectronics/stm32h7xx_hal_driver.git external/STM32H7xx_HAL_Driver
-- git submodule add https://github.com/FreeRTOS/FreeRTOS-Kernel.git external/FreeRTOS
-
+src/core/audio/audio_pipeline.c:
+- Implement AudioPipeline_HandleEndOfFile()
+- Add callbacks for playback state changes
+- Add smooth transition logic between tracks
+- Implement end-of-playlist handling
 
 src/platform/main.c:
 - Create main application entry point
@@ -31,6 +45,12 @@ src/platform/main.c:
 - Initialize audio subsystem
 - Set up error handling
 
+tests/platform/platform_tests.c:
+- Buffer management tests
+- Add DMA tests
+- Add unit tests for DAC operations
+- Add GPIO tests
+
 tests/mocks/stm32h7xx_hal_mock.c:
 - Create mock implementation of STM32 HAL functions
 - Add mock GPIO functions
@@ -39,31 +59,10 @@ tests/mocks/stm32h7xx_hal_mock.c:
 - Create mock timer functions
 - Add mock interrupt handling
 
-src/platform/filesystem.c:
-- Implement FileSystem_ReadAudioData() for reading audio chunks
-- Add file handle management for current audio file
-- Implement FileSystem_Seek() for track seeking
-- Add FileSystem_OpenFile() with error handling
-- Add FileSystem_CloseFile() cleanup
-- Add support for different audio file formats
-- Implement basic file caching for better performance
-- Add error reporting mechanism
-
-src/core/audio/audio_pipeline.c:
-- Implement AudioPipeline_HandleEndOfFile()
-- Add smooth transition logic between tracks
-- Implement end-of-playlist handling
-- Add callbacks for playback state changes
-
-tests/core/filesystem_tests.c:
-- Create test suite for filesystem operations
-- Add mock filesystem for testing
-- Test error conditions and recovery
-- Test partial reads and EOF conditions
-- Add performance benchmarks for read operations
-- Test file format detection
-- Test seek operations
-- Add stress tests for concurrent operations
+Add to project:
+- git submodule add https://github.com/ARM-software/CMSIS_5.git external/CMSIS
+- git submodule add https://github.com/STMicroelectronics/stm32h7xx_hal_driver.git external/STM32H7xx_HAL_Driver
+- git submodule add https://github.com/FreeRTOS/FreeRTOS-Kernel.git external/FreeRTOS
 
 src/core/audio/format_decoder.h:
 - Define decoder interface for MP3 audio format
