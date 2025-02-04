@@ -31,6 +31,16 @@ tests/core/filesystem_tests.c:
 - Add stress tests for concurrent operations
 - Add performance benchmarks for read operations
 
+src/core/audio/format_handlers.c:
+- Implement proper MP3 frame detection and handling
+- Add FLAC frame decoding support
+- Add ID3 tag parsing for MP3 files
+- Add FLAC metadata block parsing
+- Implement frame-aligned seeking for both formats
+- Add support for VBR MP3 files
+- Add support for different FLAC compression levels
+- Implement proper error handling for corrupt frames
+
 src/core/audio/audio_pipeline.c:
 - Implement AudioPipeline_HandleEndOfFile()
 - Add callbacks for playback state changes
