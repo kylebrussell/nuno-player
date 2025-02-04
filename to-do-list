@@ -1,6 +1,4 @@
 src/core/audio/audio_buffer.c:
-- Add error handling for FileSystem_ReadAudioData failures
-- Implement retry logic for failed reads
 - Add configurable read chunk sizes
 - Add error reporting mechanism for buffer underruns
 - Implement buffer statistics for filesystem read operations

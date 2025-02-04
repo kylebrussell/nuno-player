@@ -24,6 +24,19 @@ typedef struct {
     volatile bool gapless_transition;
 } DoubleBuffer;
 
+// Maximum number of read retries before giving up
+#define MAX_READ_RETRIES 3
+
+// Read retry delay in milliseconds
+#define READ_RETRY_DELAY_MS 5
+
+// Error tracking
+static struct {
+    size_t read_errors;
+    size_t retry_successes;
+    size_t total_underruns;
+} error_stats = {0};
+
 // Static instances
 static CircularBuffer circular_buffer;
 static DoubleBuffer double_buffer;
@@ -149,7 +162,7 @@ void AudioBuffer_HandleUnderrun(void) {
     RequestMoreData();
 }
 
-// Request more data from source
+// Request more data from source with retry logic
 static void RequestMoreData(void) {
     // Only request more data if we have space available
     if (circular_buffer.is_full) {
@@ -166,30 +179,68 @@ static void RequestMoreData(void) {
 
     // Only trigger read if we have enough space
     if (available_space >= BUFFER_THRESHOLD) {
-        // Get the next chunk of audio data from filesystem
         uint16_t temp_buffer[BUFFER_THRESHOLD];
-        size_t bytes_read = FileSystem_ReadAudioData(
-            temp_buffer,
-            BUFFER_THRESHOLD * sizeof(uint16_t)
-        );
+        size_t bytes_read = 0;
+        bool read_success = false;
+        uint8_t retry_count = 0;
 
-        // Convert bytes read to number of samples
-        size_t samples_read = bytes_read / sizeof(uint16_t);
+        // Retry loop for reading data
+        while (!read_success && retry_count < MAX_READ_RETRIES) {
+            bytes_read = FileSystem_ReadAudioData(
+                temp_buffer,
+                BUFFER_THRESHOLD * sizeof(uint16_t)
+            );
 
-        // Add samples to circular buffer
-        for (size_t i = 0; i < samples_read; i++) {
-            if (!CircularBuffer_Add(&circular_buffer, temp_buffer[i])) {
-                // Buffer is full
-                break;
+            if (bytes_read > 0) {
+                read_success = true;
+                if (retry_count > 0) {
+                    error_stats.retry_successes++;
+                }
+            } else {
+                retry_count++;
+                error_stats.read_errors++;
+                
+                // Add delay between retries to allow system recovery
+                platform_delay_ms(READ_RETRY_DELAY_MS);
             }
         }
 
-        // If we couldn't read enough data, we may be at end of file
-        if (samples_read < BUFFER_THRESHOLD) {
-            // Notify audio pipeline about end of file
-            AudioPipeline_HandleEndOfFile();
+        if (read_success) {
+            // Convert bytes read to number of samples
+            size_t samples_read = bytes_read / sizeof(uint16_t);
+
+            // Add samples to circular buffer
+            size_t samples_added = 0;
+            for (size_t i = 0; i < samples_read; i++) {
+                if (!CircularBuffer_Add(&circular_buffer, temp_buffer[i])) {
+                    // Buffer is full
+                    break;
+                }
+                samples_added++;
+            }
+
+            // If we couldn't read enough data, we may be at end of file
+            if (samples_read < BUFFER_THRESHOLD) {
+                AudioPipeline_HandleEndOfFile();
+            }
+        } else {
+            // All retries failed
+            error_stats.total_underruns++;
+            AudioBuffer_HandleUnderrun();
         }
     }
+}
+
+// Get error statistics
+void AudioBuffer_GetErrorStats(size_t* read_errors, size_t* retry_successes, size_t* total_underruns) {
+    if (read_errors) *read_errors = error_stats.read_errors;
+    if (retry_successes) *retry_successes = error_stats.retry_successes;
+    if (total_underruns) *total_underruns = error_stats.total_underruns;
+}
+
+// Reset error statistics
+void AudioBuffer_ResetErrorStats(void) {
+    memset(&error_stats, 0, sizeof(error_stats));
 }
 
 // Handle gapless playback transition

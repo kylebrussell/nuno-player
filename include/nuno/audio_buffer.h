@@ -42,4 +42,10 @@ bool AudioBuffer_IsUnderThreshold(void);
  */
 void AudioBuffer_HandleUnderrun(void);
 
+// Get error statistics for audio buffer operations
+void AudioBuffer_GetErrorStats(size_t* read_errors, size_t* retry_successes, size_t* total_underruns);
+
+// Reset error statistics counters
+void AudioBuffer_ResetErrorStats(void);
+
 #endif // AUDIO_BUFFER_H
