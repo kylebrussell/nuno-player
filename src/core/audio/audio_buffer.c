@@ -24,6 +24,17 @@ typedef struct {
     volatile bool gapless_transition;
 } DoubleBuffer;
 
+// Buffer threshold configuration
+static struct {
+    size_t low_threshold;
+    size_t high_threshold;
+    float threshold_percentage;
+} buffer_config = {
+    .low_threshold = BUFFER_THRESHOLD / 2,  // Default to 50% of BUFFER_THRESHOLD
+    .high_threshold = BUFFER_THRESHOLD,     // Default to BUFFER_THRESHOLD
+    .threshold_percentage = 0.5f            // Default to 50%
+};
+
 // Buffer statistics tracking
 static struct {
     size_t total_samples_processed;
@@ -165,7 +176,7 @@ bool AudioBuffer_IsUnderThreshold(void) {
             circular_buffer.head - circular_buffer.tail : 
             circular_buffer.size + circular_buffer.head - circular_buffer.tail);
             
-    return available < BUFFER_THRESHOLD;
+    return available < buffer_config.low_threshold;
 }
 
 // Handle buffer underrun
@@ -225,7 +236,7 @@ static void RequestMoreData(void) {
     }
 
     // Only trigger read if we have enough space
-    if (available_space >= BUFFER_THRESHOLD) {
+    if (available_space >= buffer_config.high_threshold) {
         uint16_t temp_buffer[BUFFER_THRESHOLD];
         size_t bytes_read = 0;
         bool read_success = false;
@@ -341,4 +352,22 @@ static void UpdateBufferUtilization(void) {
     // Simple moving average
     buffer_stats.average_buffer_utilization = 
         (buffer_stats.average_buffer_utilization * 0.95f) + (current_utilization * 0.05f);
+}
+
+// Configure buffer thresholds
+void AudioBuffer_ConfigureThresholds(size_t low_threshold, size_t high_threshold) {
+    if (low_threshold > high_threshold || high_threshold > AUDIO_BUFFER_SIZE) {
+        return; // Invalid configuration
+    }
+    
+    buffer_config.low_threshold = low_threshold;
+    buffer_config.high_threshold = high_threshold;
+    buffer_config.threshold_percentage = (float)low_threshold / AUDIO_BUFFER_SIZE;
+}
+
+// Get current threshold configuration
+void AudioBuffer_GetThresholdConfig(size_t* low_threshold, size_t* high_threshold, float* percentage) {
+    if (low_threshold) *low_threshold = buffer_config.low_threshold;
+    if (high_threshold) *high_threshold = buffer_config.high_threshold;
+    if (percentage) *percentage = buffer_config.threshold_percentage;
 }

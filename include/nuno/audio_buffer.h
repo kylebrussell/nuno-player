@@ -83,4 +83,20 @@ void AudioBuffer_GetBufferStats(size_t* total_samples,
  */
 void AudioBuffer_ResetBufferStats(void);
 
+/**
+ * @brief Configure buffer threshold values
+ * @param low_threshold Minimum buffer level before triggering underrun protection
+ * @param high_threshold Buffer level required before requesting more data
+ * @note Both thresholds must be less than AUDIO_BUFFER_SIZE, and low_threshold must be less than high_threshold
+ */
+void AudioBuffer_ConfigureThresholds(size_t low_threshold, size_t high_threshold);
+
+/**
+ * @brief Get current buffer threshold configuration
+ * @param low_threshold Pointer to store current low threshold value (can be NULL)
+ * @param high_threshold Pointer to store current high threshold value (can be NULL)
+ * @param percentage Pointer to store current threshold percentage of total buffer (can be NULL)
+ */
+void AudioBuffer_GetThresholdConfig(size_t* low_threshold, size_t* high_threshold, float* percentage);
+
 #endif // AUDIO_BUFFER_H
