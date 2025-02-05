@@ -37,6 +37,14 @@ static struct {
     size_t total_underruns;
 } error_stats = {0};
 
+// Detailed underrun tracking
+static struct {
+    uint32_t last_underrun_timestamp;
+    size_t samples_lost;
+    uint32_t recovery_time_ms;
+    void (*underrun_callback)(void);
+} underrun_details = {0};
+
 // Static instances
 static CircularBuffer circular_buffer;
 static DoubleBuffer double_buffer;
@@ -151,7 +159,15 @@ bool AudioBuffer_IsUnderThreshold(void) {
 
 // Handle buffer underrun
 void AudioBuffer_HandleUnderrun(void) {
+    uint32_t start_time = platform_get_time_ms();
+    
+    // Update state and stats
     double_buffer.state = BUFFER_STATE_UNDERRUN;
+    error_stats.total_underruns++;
+    
+    // Record underrun details
+    underrun_details.last_underrun_timestamp = start_time;
+    underrun_details.samples_lost = AUDIO_BUFFER_SIZE; // At least one buffer worth
     
     // Fill buffer with silence
     for (size_t i = 0; i < AUDIO_BUFFER_SIZE; i++) {
@@ -160,6 +176,26 @@ void AudioBuffer_HandleUnderrun(void) {
     
     // Attempt recovery
     RequestMoreData();
+    
+    // Calculate recovery time
+    underrun_details.recovery_time_ms = platform_get_time_ms() - start_time;
+    
+    // Notify via callback if registered
+    if (underrun_details.underrun_callback != NULL) {
+        underrun_details.underrun_callback();
+    }
+}
+
+void AudioBuffer_GetUnderrunDetails(uint32_t* timestamp, 
+                                  size_t* samples_lost,
+                                  uint32_t* recovery_time_ms) {
+    if (timestamp) *timestamp = underrun_details.last_underrun_timestamp;
+    if (samples_lost) *samples_lost = underrun_details.samples_lost;
+    if (recovery_time_ms) *recovery_time_ms = underrun_details.recovery_time_ms;
+}
+
+void AudioBuffer_RegisterUnderrunCallback(void (*callback)(void)) {
+    underrun_details.underrun_callback = callback;
 }
 
 // Request more data from source with retry logic

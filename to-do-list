@@ -1,6 +1,5 @@
 src/core/audio/audio_buffer.c:
 - Add configurable read chunk sizes
-- Add error reporting mechanism for buffer underruns
 - Implement buffer statistics for filesystem read operations
 - Add buffer statistics tracking (underruns, successful transitions)
 - Implement configurable buffer thresholds

@@ -48,4 +48,20 @@ void AudioBuffer_GetErrorStats(size_t* read_errors, size_t* retry_successes, siz
 // Reset error statistics counters
 void AudioBuffer_ResetErrorStats(void);
 
+/**
+ * @brief Get detailed information about the last underrun event
+ * @param timestamp Pointer to store the timestamp of the last underrun
+ * @param samples_lost Pointer to store number of samples lost during underrun
+ * @param recovery_time_ms Pointer to store how long recovery took in ms
+ */
+void AudioBuffer_GetUnderrunDetails(uint32_t* timestamp, 
+                                  size_t* samples_lost,
+                                  uint32_t* recovery_time_ms);
+
+/**
+ * @brief Register a callback function to be notified of underrun events
+ * @param callback Function pointer to call when underrun occurs
+ */
+void AudioBuffer_RegisterUnderrunCallback(void (*callback)(void));
+
 #endif // AUDIO_BUFFER_H
