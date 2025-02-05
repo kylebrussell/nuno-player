@@ -64,4 +64,23 @@ void AudioBuffer_GetUnderrunDetails(uint32_t* timestamp,
  */
 void AudioBuffer_RegisterUnderrunCallback(void (*callback)(void));
 
+/**
+ * @brief Get buffer performance statistics
+ * @param total_samples Pointer to store total samples processed
+ * @param transitions Pointer to store number of successful transitions
+ * @param underruns Pointer to store number of buffer underruns
+ * @param last_transition_time Pointer to store timestamp of last transition
+ * @param buffer_utilization Pointer to store average buffer utilization (0.0-1.0)
+ */
+void AudioBuffer_GetBufferStats(size_t* total_samples,
+                              size_t* transitions,
+                              size_t* underruns,
+                              uint32_t* last_transition_time,
+                              float* buffer_utilization);
+
+/**
+ * @brief Reset all buffer statistics to zero
+ */
+void AudioBuffer_ResetBufferStats(void);
+
 #endif // AUDIO_BUFFER_H

@@ -24,6 +24,15 @@ typedef struct {
     volatile bool gapless_transition;
 } DoubleBuffer;
 
+// Buffer statistics tracking
+static struct {
+    size_t total_samples_processed;
+    size_t successful_transitions;
+    size_t buffer_underruns;
+    uint32_t last_transition_timestamp;
+    float average_buffer_utilization;
+} buffer_stats = {0};
+
 // Maximum number of read retries before giving up
 #define MAX_READ_RETRIES 3
 
@@ -124,12 +133,14 @@ void AudioBuffer_Done(void) {
     
     // Start filling the just-completed buffer
     if (!FillBuffer(current_buffer)) {
+        buffer_stats.buffer_underruns++;  // Track underrun
         AudioBuffer_HandleUnderrun();
         return;
     }
     
     double_buffer.buffer_ready[current_buffer] = true;
     double_buffer.samples_played += AUDIO_BUFFER_SIZE;
+    buffer_stats.total_samples_processed += AUDIO_BUFFER_SIZE;
     
     // Handle gapless transition if needed
     if (double_buffer.gapless_transition) {
@@ -285,6 +296,8 @@ static void HandleGaplessTransition(void) {
         // Seamlessly transition to next track
         double_buffer.gapless_transition = false;
         double_buffer.samples_played = 0;
+        buffer_stats.successful_transitions++;
+        buffer_stats.last_transition_timestamp = platform_get_time_ms();
     }
 }
 
@@ -296,4 +309,36 @@ BufferState AudioBuffer_GetState(void) {
 // Enable gapless playback for next track
 void AudioBuffer_PrepareGaplessTransition(void) {
     double_buffer.gapless_transition = true;
+}
+
+// Get buffer statistics
+void AudioBuffer_GetBufferStats(size_t* total_samples,
+                              size_t* transitions,
+                              size_t* underruns,
+                              uint32_t* last_transition_time,
+                              float* buffer_utilization) {
+    if (total_samples) *total_samples = buffer_stats.total_samples_processed;
+    if (transitions) *transitions = buffer_stats.successful_transitions;
+    if (underruns) *underruns = buffer_stats.buffer_underruns;
+    if (last_transition_time) *last_transition_time = buffer_stats.last_transition_timestamp;
+    if (buffer_utilization) *buffer_utilization = buffer_stats.average_buffer_utilization;
+}
+
+// Reset buffer statistics
+void AudioBuffer_ResetBufferStats(void) {
+    memset(&buffer_stats, 0, sizeof(buffer_stats));
+}
+
+// Update buffer utilization (call this periodically, e.g., in AudioBuffer_HalfDone)
+static void UpdateBufferUtilization(void) {
+    size_t available = (circular_buffer.is_full) ? 
+        circular_buffer.size : 
+        ((circular_buffer.head >= circular_buffer.tail) ? 
+            circular_buffer.head - circular_buffer.tail : 
+            circular_buffer.size + circular_buffer.head - circular_buffer.tail);
+    
+    float current_utilization = (float)available / circular_buffer.size;
+    // Simple moving average
+    buffer_stats.average_buffer_utilization = 
+        (buffer_stats.average_buffer_utilization * 0.95f) + (current_utilization * 0.05f);
 }
