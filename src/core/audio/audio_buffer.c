@@ -24,6 +24,17 @@ typedef struct {
     volatile bool gapless_transition;
 } DoubleBuffer;
 
+// Read chunk configuration
+static struct {
+    size_t min_chunk_size;
+    size_t max_chunk_size;
+    size_t optimal_chunk_size;
+} read_config = {
+    .min_chunk_size = 512,      // Minimum bytes to read at once
+    .max_chunk_size = 8192,     // Maximum bytes to read at once
+    .optimal_chunk_size = 4096  // Default optimal read size
+};
+
 // Buffer threshold configuration
 static struct {
     size_t low_threshold;
@@ -92,6 +103,30 @@ void AudioBuffer_Init(void) {
 // Get next buffer for DMA
 uint16_t* AudioBuffer_GetBuffer(void) {
     return double_buffer.buffer[double_buffer.active_buffer];
+}
+
+void AudioBuffer_ConfigureReadChunks(size_t min_size, size_t max_size, size_t optimal_size) {
+    // Validate parameters
+    if (min_size > max_size || optimal_size < min_size || optimal_size > max_size) {
+        return; // Invalid configuration
+    }
+    
+    // Ensure sizes are multiples of 2 for alignment
+    min_size &= ~1;
+    max_size &= ~1;
+    optimal_size &= ~1;
+    
+    if (min_size < 32) min_size = 32; // Enforce minimum reasonable size
+    
+    read_config.min_chunk_size = min_size;
+    read_config.max_chunk_size = max_size;
+    read_config.optimal_chunk_size = optimal_size;
+}
+
+void AudioBuffer_GetReadChunkConfig(size_t* min_size, size_t* max_size, size_t* optimal_size) {
+    if (min_size) *min_size = read_config.min_chunk_size;
+    if (max_size) *max_size = read_config.max_chunk_size;
+    if (optimal_size) *optimal_size = read_config.optimal_chunk_size;
 }
 
 // Start audio playback with preload
@@ -220,9 +255,7 @@ void AudioBuffer_RegisterUnderrunCallback(void (*callback)(void)) {
     underrun_details.underrun_callback = callback;
 }
 
-// Request more data from source with retry logic
 static void RequestMoreData(void) {
-    // Only request more data if we have space available
     if (circular_buffer.is_full) {
         return;
     }
@@ -235,19 +268,41 @@ static void RequestMoreData(void) {
         available_space = circular_buffer.tail - circular_buffer.head;
     }
 
-    // Only trigger read if we have enough space
-    if (available_space >= buffer_config.high_threshold) {
-        uint16_t temp_buffer[BUFFER_THRESHOLD];
+    // Determine optimal read size based on available space and configuration
+    size_t read_size = read_config.optimal_chunk_size;
+    
+    // Don't read more than available space
+    if (read_size > available_space) {
+        read_size = available_space;
+    }
+    
+    // Clamp to configured limits
+    if (read_size > read_config.max_chunk_size) {
+        read_size = read_config.max_chunk_size;
+    } else if (read_size < read_config.min_chunk_size) {
+        // If we can't read at least the minimum size, wait for more space
+        if (available_space < read_config.min_chunk_size) {
+            return;
+        }
+        read_size = read_config.min_chunk_size;
+    }
+
+    // Ensure read size is even for 16-bit samples
+    read_size &= ~1;
+    
+    if (read_size >= read_config.min_chunk_size) {
+        uint16_t* temp_buffer = (uint16_t*)malloc(read_size);
+        if (!temp_buffer) {
+            error_stats.read_errors++;
+            return;
+        }
+
         size_t bytes_read = 0;
         bool read_success = false;
         uint8_t retry_count = 0;
 
-        // Retry loop for reading data
         while (!read_success && retry_count < MAX_READ_RETRIES) {
-            bytes_read = FileSystem_ReadAudioData(
-                temp_buffer,
-                BUFFER_THRESHOLD * sizeof(uint16_t)
-            );
+            bytes_read = FileSystem_ReadAudioData(temp_buffer, read_size);
 
             if (bytes_read > 0) {
                 read_success = true;
@@ -257,35 +312,30 @@ static void RequestMoreData(void) {
             } else {
                 retry_count++;
                 error_stats.read_errors++;
-                
-                // Add delay between retries to allow system recovery
                 platform_delay_ms(READ_RETRY_DELAY_MS);
             }
         }
 
         if (read_success) {
-            // Convert bytes read to number of samples
             size_t samples_read = bytes_read / sizeof(uint16_t);
-
-            // Add samples to circular buffer
             size_t samples_added = 0;
+
             for (size_t i = 0; i < samples_read; i++) {
                 if (!CircularBuffer_Add(&circular_buffer, temp_buffer[i])) {
-                    // Buffer is full
                     break;
                 }
                 samples_added++;
             }
 
-            // If we couldn't read enough data, we may be at end of file
-            if (samples_read < BUFFER_THRESHOLD) {
+            if (samples_read < (read_size / sizeof(uint16_t))) {
                 AudioPipeline_HandleEndOfFile();
             }
         } else {
-            // All retries failed
             error_stats.total_underruns++;
             AudioBuffer_HandleUnderrun();
         }
+
+        free(temp_buffer);
     }
 }
 

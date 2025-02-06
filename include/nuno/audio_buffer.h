@@ -83,6 +83,12 @@ void AudioBuffer_GetBufferStats(size_t* total_samples,
  */
 void AudioBuffer_ResetBufferStats(void);
 
+// Configure read chunk sizes
+void AudioBuffer_ConfigureReadChunks(size_t min_size, size_t max_size, size_t optimal_size);
+
+// Get current read chunk configuration
+void AudioBuffer_GetReadChunkConfig(size_t* min_size, size_t* max_size, size_t* optimal_size);
+
 /**
  * @brief Configure buffer threshold values
  * @param low_threshold Minimum buffer level before triggering underrun protection

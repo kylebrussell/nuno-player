@@ -1,5 +1,4 @@
 src/core/audio/audio_buffer.c:
-- Add configurable read chunk sizes
 - Implement buffer statistics for filesystem read operations
 - Implement buffer flush mechanism for seeking
 - Add support for variable sample rates
