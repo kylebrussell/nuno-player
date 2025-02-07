@@ -26,8 +26,6 @@ src/core/audio/format_handlers.c:
 - Implement proper error handling for corrupt frames
 
 src/core/audio/audio_pipeline.c:
-- Implement AudioPipeline_HandleEndOfFile()
-- Add callbacks for playback state changes
 - Add smooth transition logic between tracks
 - Implement end-of-playlist handling
 
@@ -98,6 +96,7 @@ tests/core/audio_tests.c:
 - Add format decoder tests
 - Test gapless playback
 - Add performance benchmarks
+- Add unit tests for pipeline state change callbacks
 
 tests/ui/menu_tests.c:
 - Test scroll performance

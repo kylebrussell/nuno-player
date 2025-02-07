@@ -13,6 +13,7 @@ typedef struct {
     bool gapless_enabled;
     PipelineState state;
     volatile bool transition_pending;
+    PipelineStateCallback state_callback;
 } AudioPipeline;
 
 static AudioPipeline pipeline;
@@ -21,7 +22,7 @@ static AudioPipeline pipeline;
 bool AudioPipeline_Init(void) {
     // Initialize pipeline state
     memset(&pipeline, 0, sizeof(AudioPipeline));
-    pipeline.state = PIPELINE_STATE_STOPPED;
+    updatePipelineState(PIPELINE_STATE_STOPPED);
     pipeline.sample_rate = 44100;  // Default to CD quality
     pipeline.bit_depth = 16;
     
@@ -61,7 +62,7 @@ bool AudioPipeline_Play(void) {
             }
         }
 
-        pipeline.state = PIPELINE_STATE_PLAYING;
+        updatePipelineState(PIPELINE_STATE_PLAYING);
         return true;
     }
     return false;
@@ -73,7 +74,7 @@ bool AudioPipeline_Pause(void) {
         // Stop DMA transfers but keep buffers intact
         DMA_PauseTransfer();
         
-        pipeline.state = PIPELINE_STATE_PAUSED;
+        updatePipelineState(PIPELINE_STATE_PAUSED);
         return true;
     }
     return false;
@@ -91,7 +92,7 @@ bool AudioPipeline_Stop(void) {
         // Reset buffer system
         AudioBuffer_Init();
         
-        pipeline.state = PIPELINE_STATE_STOPPED;
+        updatePipelineState(PIPELINE_STATE_STOPPED);
         return true;
     }
     return false;
@@ -176,10 +177,31 @@ void AudioPipeline_HandleEndOfFile(void) {
 
     // Attempt to start playing the next track
     if (AudioPipeline_Play()) {
-        pipeline.state = PIPELINE_STATE_PLAYING;
+        updatePipelineState(PIPELINE_STATE_PLAYING);
     } else {
         // If we couldn't start the next track, remain stopped
-        pipeline.state = PIPELINE_STATE_STOPPED;
+        updatePipelineState(PIPELINE_STATE_STOPPED);
         pipeline.transition_pending = false;
+    }
+}
+
+void AudioPipeline_RegisterStateCallback(PipelineStateCallback callback) {
+    pipeline.state_callback = callback;
+}
+
+void AudioPipeline_UnregisterStateCallback(void) {
+    pipeline.state_callback = NULL;
+}
+
+// Helper function to handle state transitions
+static void updatePipelineState(PipelineState newState) {
+    if (pipeline.state != newState) {
+        PipelineState oldState = pipeline.state;
+        pipeline.state = newState;
+        
+        // Notify callback if registered
+        if (pipeline.state_callback != NULL) {
+            pipeline.state_callback(oldState, newState);
+        }
     }
 }

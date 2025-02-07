@@ -84,4 +84,20 @@ void AudioPipeline_HandleUnderrun(void);
  */
 void AudioPipeline_HandleEndOfFile(void);
 
+// Add these declarations at the end of the header file, before the #endif
+
+// Callback function type for state changes
+typedef void (*PipelineStateCallback)(PipelineState oldState, PipelineState newState);
+
+/**
+ * @brief Register a callback for pipeline state changes
+ * @param callback Function to be called when pipeline state changes
+ */
+void AudioPipeline_RegisterStateCallback(PipelineStateCallback callback);
+
+/**
+ * @brief Unregister the state change callback
+ */
+void AudioPipeline_UnregisterStateCallback(void);
+
 #endif /* AUDIO_PIPELINE_H */
