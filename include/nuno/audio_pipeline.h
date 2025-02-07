@@ -4,6 +4,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// Pipeline state enumeration
+typedef enum {
+    PIPELINE_STATE_STOPPED,
+    PIPELINE_STATE_PLAYING,
+    PIPELINE_STATE_PAUSED,
+    PIPELINE_STATE_TRANSITIONING
+} PipelineState;
+
 // Pipeline configuration structure
 typedef struct {
     uint32_t sample_rate;    // Sample rate in Hz (e.g., 44100, 48000)

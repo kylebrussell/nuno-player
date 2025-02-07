@@ -161,3 +161,32 @@ void AudioPipeline_HandleUnderrun(void) {
         AudioPipeline_Play();
     }
 }
+
+void AudioPipeline_HandleEndOfFile(void) {
+    // If we're already transitioning or not playing, ignore
+    if (pipeline.state != PIPELINE_STATE_PLAYING || pipeline.transition_pending) {
+        return;
+    }
+
+    pipeline.transition_pending = true;
+
+    // If gapless playback is enabled, prepare for smooth transition
+    if (pipeline.gapless_enabled) {
+        AudioBuffer_PrepareGaplessTransition();
+        
+        // Let the buffer system handle the transition timing
+        return;
+    }
+
+    // Standard (non-gapless) end of file handling
+    AudioPipeline_Stop();
+
+    // Attempt to start playing the next track
+    if (AudioPipeline_Play()) {
+        pipeline.state = PIPELINE_STATE_PLAYING;
+    } else {
+        // If we couldn't start the next track, remain stopped
+        pipeline.state = PIPELINE_STATE_STOPPED;
+        pipeline.transition_pending = false;
+    }
+}
