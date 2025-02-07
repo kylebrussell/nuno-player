@@ -1,19 +1,13 @@
-#include "nuno/gpio.h"
-#include "nuno/stm32h7xx_hal.h"
+#include "gpio.h"
+#include "nuno/ui_state.h"
 
-// DAC Control Lines Configuration
-#define DAC_CS_PIN          GPIO_PIN_4
-#define DAC_CS_GPIO_PORT    GPIOA
-#define DAC_RESET_PIN       GPIO_PIN_5
-#define DAC_RESET_GPIO_PORT  GPIOA
+// Click Wheel state variables
+static uint32_t click_wheel_bits = 0;
+static uint8_t bit_index = 0;
+static uint8_t data_bit = 1;
+static uint8_t last_position = 255;
+static const uint32_t PACKET_START = 0b01101;
 
-// Click Wheel Configuration
-#define CLICK_WHEEL_PIN     GPIO_PIN_0
-#define CLICK_WHEEL_GPIO_PORT GPIOB
-
-/**
- * @brief Initialize GPIOs for DAC control and Click Wheel input
- */
 void GPIO_Init(void) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
@@ -21,74 +15,95 @@ void GPIO_Init(void) {
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    // Configure DAC Chip Select Pin
+    // Configure DAC Chip Select Pin (preserved from original)
     GPIO_InitStruct.Pin = DAC_CS_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(DAC_CS_GPIO_PORT, &GPIO_InitStruct);
 
-    // Configure DAC Reset Pin
+    // Configure DAC Reset Pin (preserved from original)
     GPIO_InitStruct.Pin = DAC_RESET_PIN;
     HAL_GPIO_Init(DAC_RESET_GPIO_PORT, &GPIO_InitStruct);
 
-    // Set DAC Pins to High by default
+    // Set DAC Pins to High by default (preserved from original)
     HAL_GPIO_WritePin(DAC_CS_GPIO_PORT, DAC_CS_PIN, GPIO_PIN_SET);
     HAL_GPIO_WritePin(DAC_RESET_GPIO_PORT, DAC_RESET_PIN, GPIO_PIN_SET);
 
-    // Configure Click Wheel Pin as Input with Interrupt
-    GPIO_InitStruct.Pin = CLICK_WHEEL_PIN;
-    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+    // Configure Click Wheel Clock Pin (added)
+    GPIO_InitStruct.Pin = CLICK_WHEEL_CLOCK_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
     GPIO_InitStruct.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(CLICK_WHEEL_GPIO_PORT, &GPIO_InitStruct);
 
-    // Enable and set Click Wheel EXTI Interrupt to the lowest priority
+    // Configure Click Wheel Data Pin (added)
+    GPIO_InitStruct.Pin = CLICK_WHEEL_DATA_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(CLICK_WHEEL_GPIO_PORT, &GPIO_InitStruct);
+
+    // Enable Click Wheel interrupt
     HAL_NVIC_SetPriority(EXTI0_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 }
 
-/**
- * @brief Configure DAC control lines
- */
+// Preserved from original
 void DAC_ControlLines_Config(void) {
     // Assuming GPIOs are already initialized in GPIO_Init
     // Additional DAC-specific configurations can be added here
 }
 
-/**
- * @brief Reset the DAC module
- */
+// Preserved from original
 void DAC_Reset(void) {
-    // Pull Reset pin low
     HAL_GPIO_WritePin(DAC_RESET_GPIO_PORT, DAC_RESET_PIN, GPIO_PIN_RESET);
-    HAL_Delay(10); // Delay for reset duration
-    // Pull Reset pin high
+    HAL_Delay(1); // Brief delay for reset pulse
     HAL_GPIO_WritePin(DAC_RESET_GPIO_PORT, DAC_RESET_PIN, GPIO_PIN_SET);
 }
 
-/**
- * @brief EXTI line interrupt handler for Click Wheel
- */
-void EXTI0_IRQHandler(void) {
-    HAL_GPIO_EXTI_IRQHandler(CLICK_WHEEL_PIN);
-}
+// Click Wheel functions (added)
+void Process_ClickWheel_Data(uint32_t data) {
+    if ((data & PACKET_START) != PACKET_START) {
+        return;
+    }
 
-/**
- * @brief Callback function executed on Click Wheel interrupt
- * @param GPIO_Pin The pin number that triggered the interrupt
- */
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-    if(GPIO_Pin == CLICK_WHEEL_PIN) {
-        // Handle Click Wheel input
-        // For example, read the rotation direction or button press
-        Process_ClickWheel_Input();
+    // Get wheel position
+    uint8_t wheel_position = (data >> 16) & 0xFF;
+    
+    // Process button states
+    if ((data >> CENTER_BUTTON_BIT) & 1) {
+        handleButtonPress(&uiState, BUTTON_CENTER, HAL_GetTick());
+    }
+    if ((data >> LEFT_BUTTON_BIT) & 1) {
+        handleButtonPress(&uiState, BUTTON_MENU, HAL_GetTick());
+    }
+    if ((data >> RIGHT_BUTTON_BIT) & 1) {
+        handleButtonPress(&uiState, BUTTON_PLAY, HAL_GetTick());
+    }
+    
+    // Process rotation
+    if (wheel_position != last_position) {
+        int8_t direction = ((wheel_position - last_position + 128) % 256) - 128;
+        handleRotation(&uiState, direction, HAL_GetTick());
+        last_position = wheel_position;
     }
 }
 
-/**
- * @brief Process Click Wheel input events
- */
-void Process_ClickWheel_Input(void) {
-    // Implement debouncing if necessary
-    // Read the state of the Click Wheel and perform actions
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+    if (GPIO_Pin == CLICK_WHEEL_CLOCK_PIN) {
+        // Sample data pin
+        data_bit = HAL_GPIO_ReadPin(CLICK_WHEEL_GPIO_PORT, CLICK_WHEEL_DATA_PIN);
+        
+        // Update bits
+        if (data_bit) {
+            click_wheel_bits |= (1 << bit_index);
+        } else {
+            click_wheel_bits &= ~(1 << bit_index);
+        }
+        
+        if (++bit_index == 32) {
+            Process_ClickWheel_Data(click_wheel_bits);
+            bit_index = 0;
+            click_wheel_bits = 0;
+        }
+    }
 }

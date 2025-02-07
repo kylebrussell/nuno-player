@@ -3,50 +3,37 @@
 
 #include "stm32h7xx_hal.h"
 
-// DAC Control Pins
+// DAC Control Pins (preserved from original)
 #define DAC_CS_PIN           GPIO_PIN_4
 #define DAC_CS_GPIO_PORT     GPIOA
 #define DAC_RESET_PIN        GPIO_PIN_5
 #define DAC_RESET_GPIO_PORT  GPIOA
 
-// Click Wheel Pin
-#define CLICK_WHEEL_PIN      GPIO_PIN_0
-#define CLICK_WHEEL_GPIO_PORT GPIOB
+// Click Wheel Pins (added)
+#define CLICK_WHEEL_CLOCK_PIN     GPIO_PIN_0
+#define CLICK_WHEEL_DATA_PIN      GPIO_PIN_1
+#define CLICK_WHEEL_GPIO_PORT     GPIOB
+
+// Click Wheel Button Bits
+#define CENTER_BUTTON_BIT  7
+#define LEFT_BUTTON_BIT    9
+#define RIGHT_BUTTON_BIT   8
+#define UP_BUTTON_BIT      11
+#define DOWN_BUTTON_BIT    10
+#define WHEEL_TOUCH_BIT    29
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- * @brief Initialize GPIOs for DAC control and Click Wheel input
- */
+// Existing DAC function declarations
 void GPIO_Init(void);
-
-/**
- * @brief Configure DAC control lines
- */
 void DAC_ControlLines_Config(void);
-
-/**
- * @brief Reset the DAC module
- */
 void DAC_Reset(void);
 
-/**
- * @brief EXTI line interrupt handler for Click Wheel
- */
-void EXTI0_IRQHandler(void);
-
-/**
- * @brief Callback function executed on Click Wheel interrupt
- * @param GPIO_Pin The pin number that triggered the interrupt
- */
+// Click Wheel function declarations (added)
+void Process_ClickWheel_Data(uint32_t data);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
-
-/**
- * @brief Process Click Wheel input events
- */
-void Process_ClickWheel_Input(void);
 
 #ifdef __cplusplus
 }
