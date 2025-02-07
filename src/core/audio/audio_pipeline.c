@@ -4,13 +4,6 @@
 #include "platform.h"
 #include <string.h>
 
-// Pipeline state
-typedef enum {
-    PIPELINE_STATE_STOPPED,
-    PIPELINE_STATE_PLAYING,
-    PIPELINE_STATE_PAUSED,
-    PIPELINE_STATE_TRANSITIONING
-} PipelineState;
 
 // Pipeline configuration
 typedef struct {
