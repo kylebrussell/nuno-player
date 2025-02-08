@@ -4,6 +4,7 @@
 #include "nuno/audio_pipeline.h"
 #include <stdbool.h>
 #include <string.h>
+#include <math.h>
 
 // Buffer states
 typedef enum {
@@ -91,6 +92,29 @@ static struct {
     .avg_read_size = 0
 };
 
+// Crossfade configuration
+static struct {
+    size_t fade_length;         // Length of crossfade in samples
+    float fade_curve;           // Curve factor (1.0 = linear)
+    bool enabled;               // Whether crossfading is enabled
+    bool in_progress;           // Whether a crossfade is currently happening
+    size_t current_position;    // Current position in the crossfade
+} crossfade_config = {
+    .fade_length = 0,
+    .fade_curve = 1.0f,
+    .enabled = false,
+    .in_progress = false,
+    .current_position = 0
+};
+
+// Crossfade buffer for transition
+static struct {
+    uint16_t* buffer;
+    size_t size;
+    size_t position;
+    bool ready;
+} crossfade_buffer = {0};
+
 // Static instances
 static CircularBuffer circular_buffer;
 static DoubleBuffer double_buffer;
@@ -113,6 +137,9 @@ void AudioBuffer_Init(void) {
     double_buffer.active_buffer = 0;
     double_buffer.state = BUFFER_STATE_EMPTY;
     double_buffer.gapless_transition = false;
+
+    // Initialize crossfade buffer
+    InitializeCrossfadeBuffer();
 }
 
 // Get next buffer for DMA
@@ -172,20 +199,109 @@ bool AudioBuffer_StartPlayback(void) {
     return false;
 }
 
-// Fill a specific buffer with audio data
+// Initialize crossfade buffer
+static bool InitializeCrossfadeBuffer(void) {
+    crossfade_buffer.buffer = (uint16_t*)malloc(AUDIO_BUFFER_SIZE * sizeof(uint16_t));
+    if (crossfade_buffer.buffer == NULL) {
+        return false;
+    }
+    crossfade_buffer.size = AUDIO_BUFFER_SIZE;
+    crossfade_buffer.position = 0;
+    crossfade_buffer.ready = false;
+    return true;
+}
+
+// Calculate fade factor using curve
+static float CalculateFadeFactor(float position) {
+    float linear = position;
+    if (crossfade_config.fade_curve == 1.0f) {
+        return linear;
+    }
+    // Apply curve factor (higher values = steeper curve)
+    return powf(linear, crossfade_config.fade_curve);
+}
+
+// Mix samples with crossfade
+static uint16_t MixSamples(uint16_t sample1, uint16_t sample2, float mix_factor) {
+    // Convert uint16_t to signed int32_t for calculations
+    int32_t s1 = (int16_t)sample1;
+    int32_t s2 = (int16_t)sample2;
+    
+    // Calculate weighted sum
+    float fade_out = 1.0f - mix_factor;
+    float fade_in = mix_factor;
+    
+    int32_t mixed = (int32_t)((s1 * fade_out) + (s2 * fade_in));
+    
+    // Clamp to int16_t range
+    if (mixed > 32767) mixed = 32767;
+    if (mixed < -32768) mixed = -32768;
+    
+    return (uint16_t)mixed;
+}
+
+// Configure crossfade
+void AudioBuffer_ConfigureCrossfade(size_t fade_length, float curve_factor, bool enable) {
+    if (fade_length > AUDIO_BUFFER_SIZE) {
+        fade_length = AUDIO_BUFFER_SIZE;
+    }
+    if (curve_factor < 0.1f) curve_factor = 0.1f;
+    if (curve_factor > 10.0f) curve_factor = 10.0f;
+    
+    crossfade_config.fade_length = fade_length;
+    crossfade_config.fade_curve = curve_factor;
+    crossfade_config.enabled = enable;
+    
+    if (enable && crossfade_buffer.buffer == NULL) {
+        InitializeCrossfadeBuffer();
+    }
+}
+
+// Modify FillBuffer to handle crossfading
 static bool FillBuffer(uint8_t buffer_index) {
     size_t samples_needed = AUDIO_BUFFER_SIZE;
     uint16_t* target_buffer = double_buffer.buffer[buffer_index];
     
-    while (samples_needed > 0) {
-        uint16_t sample;
-        if (!CircularBuffer_Remove(&circular_buffer, &sample)) {
-            // Buffer underrun
-            double_buffer.state = BUFFER_STATE_UNDERRUN;
-            return false;
+    if (crossfade_config.enabled && crossfade_config.in_progress) {
+        // Handle crossfade mixing
+        for (size_t i = 0; i < samples_needed; i++) {
+            uint16_t current_sample;
+            if (!CircularBuffer_Remove(&circular_buffer, &current_sample)) {
+                double_buffer.state = BUFFER_STATE_UNDERRUN;
+                return false;
+            }
+            
+            if (crossfade_config.current_position < crossfade_config.fade_length) {
+                float mix_factor = CalculateFadeFactor(
+                    (float)crossfade_config.current_position / crossfade_config.fade_length
+                );
+                target_buffer[i] = MixSamples(
+                    crossfade_buffer.buffer[crossfade_buffer.position],
+                    current_sample,
+                    mix_factor
+                );
+                
+                crossfade_buffer.position++;
+                crossfade_config.current_position++;
+                
+                if (crossfade_config.current_position >= crossfade_config.fade_length) {
+                    crossfade_config.in_progress = false;
+                }
+            } else {
+                target_buffer[i] = current_sample;
+            }
         }
-        *target_buffer++ = sample;
-        samples_needed--;
+    } else {
+        // Normal buffer filling without crossfade
+        while (samples_needed > 0) {
+            uint16_t sample;
+            if (!CircularBuffer_Remove(&circular_buffer, &sample)) {
+                double_buffer.state = BUFFER_STATE_UNDERRUN;
+                return false;
+            }
+            *target_buffer++ = sample;
+            samples_needed--;
+        }
     }
     return true;
 }
@@ -488,6 +604,7 @@ void AudioBuffer_ResetReadStats(void) {
     read_stats.max_read_time_ms = 0;
 }
 
+// Modify AudioBuffer_Flush to include crossfade cleanup
 bool AudioBuffer_Flush(bool reset_stats) {
     // Stop any ongoing DMA transfer
     DMA_StopTransfer();
@@ -506,7 +623,12 @@ bool AudioBuffer_Flush(bool reset_stats) {
     double_buffer.state = BUFFER_STATE_EMPTY;
     double_buffer.gapless_transition = false;
     
-    // Optionally reset statistics
+    // Reset crossfade state
+    crossfade_config.in_progress = false;
+    crossfade_config.current_position = 0;
+    crossfade_buffer.position = 0;
+    crossfade_buffer.ready = false;
+    
     if (reset_stats) {
         AudioBuffer_ResetBufferStats();
         AudioBuffer_ResetErrorStats();
@@ -514,4 +636,37 @@ bool AudioBuffer_Flush(bool reset_stats) {
     }
     
     return true;
+}
+
+// Start a crossfade transition
+bool AudioBuffer_StartCrossfade(void) {
+    if (!crossfade_config.enabled || crossfade_config.in_progress || 
+        !crossfade_buffer.buffer || double_buffer.state != BUFFER_STATE_PLAYING) {
+        return false;
+    }
+    
+    // Store current buffer content for crossfading
+    memcpy(crossfade_buffer.buffer, 
+           double_buffer.buffer[double_buffer.active_buffer], 
+           AUDIO_BUFFER_SIZE * sizeof(uint16_t));
+    
+    crossfade_buffer.position = 0;
+    crossfade_buffer.ready = true;
+    crossfade_config.in_progress = true;
+    crossfade_config.current_position = 0;
+    
+    return true;
+}
+
+// Add cleanup function
+void AudioBuffer_Cleanup(void) {
+    if (circular_buffer.buffer) {
+        free(circular_buffer.buffer);
+        circular_buffer.buffer = NULL;
+    }
+    
+    if (crossfade_buffer.buffer) {
+        free(crossfade_buffer.buffer);
+        crossfade_buffer.buffer = NULL;
+    }
 }

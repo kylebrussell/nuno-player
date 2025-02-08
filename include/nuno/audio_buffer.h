@@ -106,6 +106,34 @@ void AudioBuffer_ConfigureThresholds(size_t low_threshold, size_t high_threshold
 void AudioBuffer_GetThresholdConfig(size_t* low_threshold, size_t* high_threshold, float* percentage);
 
 /**
+ * @brief Configure crossfade parameters
+ * 
+ * @param fade_length Length of crossfade in samples
+ * @param curve_factor Curve factor for fade (1.0 = linear, >1 = exponential)
+ * @param enable Enable/disable crossfade functionality
+ */
+void AudioBuffer_ConfigureCrossfade(size_t fade_length, float curve_factor, bool enable);
+
+/**
+ * @brief Start a crossfade transition
+ * 
+ * Initiates a crossfade from the current audio to the next audio segment.
+ * Must be called after crossfade has been configured and enabled.
+ * 
+ * @return true if crossfade started successfully, false if crossfade
+ *         is disabled, already in progress, or system not ready
+ */
+bool AudioBuffer_StartCrossfade(void);
+
+/**
+ * @brief Clean up audio buffer resources
+ * 
+ * Frees all dynamically allocated memory used by the audio buffer system.
+ * Should be called when shutting down the audio system.
+ */
+void AudioBuffer_Cleanup(void);
+
+/**
  * @brief Prepare buffer system for crossfade transition
  * 
  * Sets up the buffer system to handle crossfade between current and next track.

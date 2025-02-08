@@ -2,7 +2,6 @@ src/core/audio/audio_buffer.c:
 - Add support for variable sample rates
 - Add support for different bit depths
 - Add power-saving mode support
-- Implement crossfade buffer management and sample mixing
 
 tests/core/filesystem_tests.c:
 - Create test suite for filesystem operations
