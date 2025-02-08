@@ -105,4 +105,56 @@ void AudioBuffer_ConfigureThresholds(size_t low_threshold, size_t high_threshold
  */
 void AudioBuffer_GetThresholdConfig(size_t* low_threshold, size_t* high_threshold, float* percentage);
 
+/**
+ * @brief Prepare buffer system for crossfade transition
+ * 
+ * Sets up the buffer system to handle crossfade between current and next track.
+ * This includes allocating temporary buffers and preparing for parallel reads.
+ * 
+ * @param fade_samples Number of samples over which to perform the crossfade
+ * @return true if preparation successful, false if resources unavailable
+ */
+bool AudioBuffer_PrepareCrossfade(uint32_t fade_samples);
+
+/**
+ * @brief Get samples from the next track's buffer for crossfading
+ * 
+ * Retrieves samples from the next track's buffer during a crossfade transition.
+ * Should only be called after AudioBuffer_PrepareCrossfade().
+ * 
+ * @param buffer Buffer to store the samples from next track
+ * @param samples Number of samples to retrieve
+ * @return true if samples retrieved successfully, false otherwise
+ */
+bool AudioBuffer_GetNextTrackSamples(int16_t* buffer, size_t samples);
+
+/**
+ * @brief Complete the crossfade transition
+ * 
+ * Finalizes the crossfade transition, cleaning up temporary buffers and
+ * switching to the next track's buffer as the primary buffer.
+ * 
+ * @return true if transition completed successfully, false otherwise
+ */
+bool AudioBuffer_CompleteCrossfade(void);
+
+/**
+ * @brief Prepare for gapless transition between tracks
+ * 
+ * Sets up the buffer system for a gapless transition without crossfading.
+ * This ensures continuous playback between tracks without mixing.
+ * 
+ * @return true if preparation successful, false otherwise
+ */
+bool AudioBuffer_PrepareGaplessTransition(void);
+
+/**
+ * @brief Start playback from the buffer
+ * 
+ * Initializes DMA transfers and starts audio playback from the current buffer position.
+ * 
+ * @return true if playback started successfully, false otherwise
+ */
+bool AudioBuffer_StartPlayback(void);
+
 #endif // AUDIO_BUFFER_H

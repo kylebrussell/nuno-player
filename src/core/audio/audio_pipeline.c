@@ -14,6 +14,9 @@ typedef struct {
     PipelineState state;
     volatile bool transition_pending;
     PipelineStateCallback state_callback;
+    uint32_t transition_fade_samples;
+    float transition_crossfade_ratio;
+    bool crossfade_enabled;
 } AudioPipeline;
 
 static AudioPipeline pipeline;
@@ -103,9 +106,14 @@ bool AudioPipeline_Skip(void) {
     if (pipeline.state == PIPELINE_STATE_PLAYING) {
         pipeline.transition_pending = true;
         
-        // Prepare for gapless transition if enabled
         if (pipeline.gapless_enabled) {
-            AudioBuffer_PrepareGaplessTransition();
+            if (pipeline.crossfade_enabled) {
+                // Initialize crossfade
+                pipeline.transition_crossfade_ratio = 0.0f;
+                AudioBuffer_PrepareCrossfade(pipeline.transition_fade_samples);
+            } else {
+                AudioBuffer_PrepareGaplessTransition();
+            }
         } else {
             // Standard skip - stop current playback
             AudioPipeline_Stop();
@@ -131,12 +139,16 @@ bool AudioPipeline_Configure(const AudioPipelineConfig* config) {
     pipeline.sample_rate = config->sample_rate;
     pipeline.bit_depth = config->bit_depth;
     pipeline.gapless_enabled = config->gapless_enabled;
+    pipeline.crossfade_enabled = config->crossfade_enabled;
+    
+    // Calculate fade duration in samples (default 50ms crossfade)
+    pipeline.transition_fade_samples = (pipeline.sample_rate * 50) / 1000;
+    pipeline.transition_crossfade_ratio = 0.0f;
 
     // Update DAC configuration
     pipeline.dac_config.sample_rate = config->sample_rate;
     pipeline.dac_config.bit_depth = config->bit_depth;
     
-    // Apply new DAC settings
     return ES9038Q2M_ConfigureClock(config->sample_rate, config->bit_depth);
 }
 
@@ -164,22 +176,23 @@ void AudioPipeline_HandleEndOfFile(void) {
 
     pipeline.transition_pending = true;
 
-    // If gapless playback is enabled, prepare for smooth transition
     if (pipeline.gapless_enabled) {
-        AudioBuffer_PrepareGaplessTransition();
-        
-        // Let the buffer system handle the transition timing
+        if (pipeline.crossfade_enabled) {
+            // Initialize crossfade
+            pipeline.transition_crossfade_ratio = 0.0f;
+            AudioBuffer_PrepareCrossfade(pipeline.transition_fade_samples);
+        } else {
+            AudioBuffer_PrepareGaplessTransition();
+        }
         return;
     }
 
     // Standard (non-gapless) end of file handling
     AudioPipeline_Stop();
 
-    // Attempt to start playing the next track
     if (AudioPipeline_Play()) {
         updatePipelineState(PIPELINE_STATE_PLAYING);
     } else {
-        // If we couldn't start the next track, remain stopped
         updatePipelineState(PIPELINE_STATE_STOPPED);
         pipeline.transition_pending = false;
     }
@@ -202,6 +215,41 @@ static void updatePipelineState(PipelineState newState) {
         // Notify callback if registered
         if (pipeline.state_callback != NULL) {
             pipeline.state_callback(oldState, newState);
+        }
+    }
+}
+
+// Add new function to handle crossfade processing
+void AudioPipeline_ProcessCrossfade(int16_t* buffer, size_t samples) {
+    if (!pipeline.transition_pending || !pipeline.crossfade_enabled) {
+        return;
+    }
+
+    // Get samples from next track's buffer
+    int16_t next_buffer[samples];
+    if (!AudioBuffer_GetNextTrackSamples(next_buffer, samples)) {
+        return;
+    }
+
+    // Apply crossfade
+    for (size_t i = 0; i < samples; i++) {
+        float fade_out = 1.0f - pipeline.transition_crossfade_ratio;
+        float fade_in = pipeline.transition_crossfade_ratio;
+        
+        buffer[i] = (int16_t)(
+            (float)buffer[i] * fade_out +
+            (float)next_buffer[i] * fade_in
+        );
+
+        // Update crossfade ratio
+        pipeline.transition_crossfade_ratio += 1.0f / pipeline.transition_fade_samples;
+        
+        // Check if crossfade is complete
+        if (pipeline.transition_crossfade_ratio >= 1.0f) {
+            AudioBuffer_CompleteCrossfade();
+            pipeline.transition_pending = false;
+            pipeline.transition_crossfade_ratio = 0.0f;
+            break;
         }
     }
 }

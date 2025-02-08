@@ -17,6 +17,7 @@ typedef struct {
     uint32_t sample_rate;    // Sample rate in Hz (e.g., 44100, 48000)
     uint8_t bit_depth;       // Bit depth (e.g., 16, 24, 32)
     bool gapless_enabled;    // Enable gapless playback transitions
+    bool crossfade_enabled;  // Enable crossfade during track transitions
 } AudioPipelineConfig;
 
 /**
@@ -99,5 +100,17 @@ void AudioPipeline_RegisterStateCallback(PipelineStateCallback callback);
  * @brief Unregister the state change callback
  */
 void AudioPipeline_UnregisterStateCallback(void);
+
+/**
+ * @brief Process crossfade between current and next track
+ * 
+ * This function handles the mixing of audio samples during track transitions
+ * when crossfade is enabled. It should be called by the audio processing loop
+ * for each buffer of samples.
+ * 
+ * @param buffer Pointer to the current audio buffer
+ * @param samples Number of samples in the buffer
+ */
+void AudioPipeline_ProcessCrossfade(int16_t* buffer, size_t samples);
 
 #endif /* AUDIO_PIPELINE_H */
