@@ -4,3 +4,6 @@
 [submodule "external/cmock"]
 	path = external/cmock
 	url = https://github.com/ThrowTheSwitch/CMock.git
+[submodule "external/STM32H7xx_HAL_Driver"]
+	path = external/STM32H7xx_HAL_Driver
+	url = https://github.com/STMicroelectronics/stm32h7xx_hal_driver.git

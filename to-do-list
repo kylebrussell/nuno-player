@@ -52,7 +52,6 @@ tests/mocks/stm32h7xx_hal_mock.c:
 
 Add to project:
 - git submodule add https://github.com/ARM-software/CMSIS_5.git external/CMSIS
-- git submodule add https://github.com/STMicroelectronics/stm32h7xx_hal_driver.git external/STM32H7xx_HAL_Driver
 - git submodule add https://github.com/FreeRTOS/FreeRTOS-Kernel.git external/FreeRTOS
 
 src/core/audio/format_decoder.h:
