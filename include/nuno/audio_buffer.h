@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>  // Add this for size_t
 
 // Buffer Configuration
 #define AUDIO_BUFFER_SIZE 4096
@@ -198,5 +199,8 @@ bool AudioBuffer_Flush(bool reset_stats);
 void AudioBuffer_ConfigureSampleRate(uint32_t source_rate, uint32_t target_rate);
 void AudioBuffer_GetSampleRateConfig(uint32_t* source_rate, uint32_t* target_rate, 
                                    bool* conversion_enabled, float* ratio);
+void AudioBuffer_ConfigureSampleFormat(uint8_t bits_per_sample, bool is_float, bool is_signed);
+void AudioBuffer_GetSampleFormat(uint8_t* bits_per_sample, bool* is_float, 
+                               bool* is_signed, uint8_t* bytes_per_sample);
 
 #endif // AUDIO_BUFFER_H

@@ -15,9 +15,17 @@ typedef enum {
     BUFFER_STATE_UNDERRUN
 } BufferState;
 
-// Double buffer structure
+// Update the buffer structures to use void* for generic sample storage
 typedef struct {
-    uint16_t buffer[2][AUDIO_BUFFER_SIZE];
+    void* buffer;
+    size_t size;           // Size in samples (not bytes)
+    size_t head;
+    size_t tail;
+    bool is_full;
+} CircularBuffer;
+
+typedef struct {
+    void* buffer[2];
     volatile bool buffer_ready[2];
     volatile uint8_t active_buffer;
     volatile BufferState state;
@@ -125,17 +133,27 @@ static struct {
     uint32_t target_sample_rate;
     bool sample_rate_conversion_enabled;
     float conversion_ratio;
+    uint8_t bits_per_sample;
+    uint8_t bytes_per_sample;
+    bool is_float;
+    bool is_signed;
 } sample_rate_config = {
     .current_sample_rate = 44100,  // Default sample rate
     .target_sample_rate = 44100,   // Default target rate
     .sample_rate_conversion_enabled = false,
-    .conversion_ratio = 1.0f
+    .conversion_ratio = 1.0f,
+    .bits_per_sample = 16,    // Default to 16-bit
+    .bytes_per_sample = 2,    // Default to 2 bytes per sample
+    .is_float = false,        // Default to integer format
+    .is_signed = true         // Default to signed format
 };
 
 // Initialize the audio buffer system
 void AudioBuffer_Init(void) {
+    size_t sample_size = sample_rate_config.bytes_per_sample;
+    
     // Initialize circular buffer
-    circular_buffer.buffer = (uint16_t*)malloc(AUDIO_BUFFER_SIZE * sizeof(uint16_t));
+    circular_buffer.buffer = malloc(AUDIO_BUFFER_SIZE * sample_size);
     if (circular_buffer.buffer == NULL) {
         // Handle memory allocation failure
         return;
@@ -147,6 +165,14 @@ void AudioBuffer_Init(void) {
 
     // Initialize double buffer
     memset(&double_buffer, 0, sizeof(DoubleBuffer));
+    double_buffer.buffer[0] = malloc(AUDIO_BUFFER_SIZE * sample_size);
+    double_buffer.buffer[1] = malloc(AUDIO_BUFFER_SIZE * sample_size);
+    if (!double_buffer.buffer[0] || !double_buffer.buffer[1]) {
+        // Handle allocation failure
+        AudioBuffer_Cleanup();
+        return;
+    }
+    
     double_buffer.active_buffer = 0;
     double_buffer.state = BUFFER_STATE_EMPTY;
     double_buffer.gapless_transition = false;
@@ -161,8 +187,8 @@ void AudioBuffer_Init(void) {
     sample_rate_config.conversion_ratio = 1.0f;
 }
 
-// Get next buffer for DMA
-uint16_t* AudioBuffer_GetBuffer(void) {
+// Update AudioBuffer_GetBuffer to return void*
+void* AudioBuffer_GetBuffer(void) {
     return double_buffer.buffer[double_buffer.active_buffer];
 }
 
@@ -763,15 +789,217 @@ bool AudioBuffer_StartCrossfade(void) {
     return true;
 }
 
-// Add cleanup function
+// Update AudioBuffer_Cleanup to handle void* buffers
 void AudioBuffer_Cleanup(void) {
     if (circular_buffer.buffer) {
         free(circular_buffer.buffer);
         circular_buffer.buffer = NULL;
     }
     
+    if (double_buffer.buffer[0]) {
+        free(double_buffer.buffer[0]);
+        double_buffer.buffer[0] = NULL;
+    }
+    
+    if (double_buffer.buffer[1]) {
+        free(double_buffer.buffer[1]);
+        double_buffer.buffer[1] = NULL;
+    }
+    
     if (crossfade_buffer.buffer) {
         free(crossfade_buffer.buffer);
         crossfade_buffer.buffer = NULL;
     }
+}
+
+// Add this new function to configure sample format
+void AudioBuffer_ConfigureSampleFormat(uint8_t bits_per_sample, bool is_float, bool is_signed) {
+    if (bits_per_sample != 8 && bits_per_sample != 16 && bits_per_sample != 24 && 
+        bits_per_sample != 32) {
+        return;  // Invalid bit depth
+    }
+    
+    sample_rate_config.bits_per_sample = bits_per_sample;
+    sample_rate_config.bytes_per_sample = (bits_per_sample + 7) / 8;
+    sample_rate_config.is_float = is_float;
+    sample_rate_config.is_signed = is_signed;
+    
+    // Adjust buffer sizes and thresholds based on new format
+    size_t adjusted_low = buffer_config.low_threshold * 
+        (sample_rate_config.bytes_per_sample / 2);  // Relative to 16-bit baseline
+    size_t adjusted_high = buffer_config.high_threshold * 
+        (sample_rate_config.bytes_per_sample / 2);
+    
+    AudioBuffer_ConfigureThresholds(adjusted_low, adjusted_high);
+}
+
+// Add getter for sample format configuration
+void AudioBuffer_GetSampleFormat(uint8_t* bits_per_sample, bool* is_float, 
+                               bool* is_signed, uint8_t* bytes_per_sample) {
+    if (bits_per_sample) *bits_per_sample = sample_rate_config.bits_per_sample;
+    if (is_float) *is_float = sample_rate_config.is_float;
+    if (is_signed) *is_signed = sample_rate_config.is_signed;
+    if (bytes_per_sample) *bytes_per_sample = sample_rate_config.bytes_per_sample;
+}
+
+// Modify MixSamples to handle different bit depths
+static void* MixSamples(void* sample1, void* sample2, float mix_factor) {
+    static union {
+        int32_t i32;
+        float f32;
+        uint32_t u32;
+        uint8_t bytes[4];
+    } result;
+
+    if (sample_rate_config.is_float) {
+        float s1 = *(float*)sample1;
+        float s2 = *(float*)sample2;
+        float mixed = (s1 * (1.0f - mix_factor)) + (s2 * mix_factor);
+        result.f32 = mixed;
+        return &result.f32;
+    }
+
+    int32_t s1 = 0, s2 = 0;
+    
+    // Convert input samples to 32-bit signed for processing
+    switch (sample_rate_config.bits_per_sample) {
+        case 8:
+            s1 = sample_rate_config.is_signed ? 
+                (int32_t)(*(int8_t*)sample1) : 
+                (int32_t)(*(uint8_t*)sample1) - 128;
+            s2 = sample_rate_config.is_signed ? 
+                (int32_t)(*(int8_t*)sample2) : 
+                (int32_t)(*(uint8_t*)sample2) - 128;
+            break;
+            
+        case 16:
+            s1 = sample_rate_config.is_signed ? 
+                (int32_t)(*(int16_t*)sample1) : 
+                (int32_t)(*(uint16_t*)sample1) - 32768;
+            s2 = sample_rate_config.is_signed ? 
+                (int32_t)(*(int16_t*)sample2) : 
+                (int32_t)(*(uint16_t*)sample2) - 32768;
+            break;
+            
+        case 24:
+            // Handle 24-bit as 3 bytes
+            if (sample_rate_config.is_signed) {
+                s1 = ((((uint8_t*)sample1)[0] << 8) | 
+                      (((uint8_t*)sample1)[1] << 16) | 
+                      (((uint8_t*)sample1)[2] << 24)) >> 8;
+                s2 = ((((uint8_t*)sample2)[0] << 8) | 
+                      (((uint8_t*)sample2)[1] << 16) | 
+                      (((uint8_t*)sample2)[2] << 24)) >> 8;
+            } else {
+                s1 = ((((uint8_t*)sample1)[0] << 8) | 
+                      (((uint8_t*)sample1)[1] << 16) | 
+                      (((uint8_t*)sample1)[2] << 24)) >> 8;
+                s2 = ((((uint8_t*)sample2)[0] << 8) | 
+                      (((uint8_t*)sample2)[1] << 16) | 
+                      (((uint8_t*)sample2)[2] << 24)) >> 8;
+                s1 -= 8388608;  // 2^23
+                s2 -= 8388608;
+            }
+            break;
+            
+        case 32:
+            s1 = sample_rate_config.is_signed ? 
+                *(int32_t*)sample1 : 
+                (int32_t)(*(uint32_t*)sample1) - 2147483648;
+            s2 = sample_rate_config.is_signed ? 
+                *(int32_t*)sample2 : 
+                (int32_t)(*(uint32_t*)sample2) - 2147483648;
+            break;
+    }
+    
+    // Mix samples
+    int32_t mixed = (int32_t)(s1 * (1.0f - mix_factor) + s2 * mix_factor);
+    
+    // Convert back to original format
+    switch (sample_rate_config.bits_per_sample) {
+        case 8:
+            if (sample_rate_config.is_signed) {
+                if (mixed > 127) mixed = 127;
+                if (mixed < -128) mixed = -128;
+                result.bytes[0] = (uint8_t)mixed;
+            } else {
+                mixed += 128;
+                if (mixed > 255) mixed = 255;
+                if (mixed < 0) mixed = 0;
+                result.bytes[0] = (uint8_t)mixed;
+            }
+            break;
+            
+        case 16:
+            if (sample_rate_config.is_signed) {
+                if (mixed > 32767) mixed = 32767;
+                if (mixed < -32768) mixed = -32768;
+                result.u32 = (uint16_t)mixed;
+            } else {
+                mixed += 32768;
+                if (mixed > 65535) mixed = 65535;
+                if (mixed < 0) mixed = 0;
+                result.u32 = (uint16_t)mixed;
+            }
+            break;
+            
+        case 24:
+            if (sample_rate_config.is_signed) {
+                if (mixed > 8388607) mixed = 8388607;
+                if (mixed < -8388608) mixed = -8388608;
+            } else {
+                mixed += 8388608;
+                if (mixed > 16777215) mixed = 16777215;
+                if (mixed < 0) mixed = 0;
+            }
+            result.bytes[0] = (mixed >> 8) & 0xFF;
+            result.bytes[1] = (mixed >> 16) & 0xFF;
+            result.bytes[2] = (mixed >> 24) & 0xFF;
+            break;
+            
+        case 32:
+            if (sample_rate_config.is_signed) {
+                result.i32 = mixed;
+            } else {
+                mixed += 2147483648;
+                result.u32 = (uint32_t)mixed;
+            }
+            break;
+    }
+    
+    return &result;
+}
+
+// Add helper function to get sample size
+static inline size_t GetSampleSize(void) {
+    return sample_rate_config.bytes_per_sample;
+}
+
+// Update circular buffer operations
+static bool CircularBuffer_Add(CircularBuffer* cb, const void* sample) {
+    if (cb->is_full) {
+        return false;
+    }
+    
+    size_t sample_size = GetSampleSize();
+    memcpy((uint8_t*)cb->buffer + (cb->head * sample_size), sample, sample_size);
+    
+    cb->head = (cb->head + 1) % cb->size;
+    cb->is_full = (cb->head == cb->tail);
+    
+    return true;
+}
+
+static bool CircularBuffer_Remove(CircularBuffer* cb, void* sample) {
+    if (cb->head == cb->tail && !cb->is_full) {
+        return false;
+    }
+    
+    size_t sample_size = GetSampleSize();
+    memcpy(sample, (uint8_t*)cb->buffer + (cb->tail * sample_size), sample_size);
+    
+    cb->tail = (cb->tail + 1) % cb->size;
+    cb->is_full = false;
+    
+    return true;
 }
