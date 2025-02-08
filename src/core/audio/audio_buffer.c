@@ -76,6 +76,21 @@ static struct {
     void (*underrun_callback)(void);
 } underrun_details = {0};
 
+// File read statistics
+static struct {
+    size_t total_bytes_read;
+    size_t total_read_operations;
+    size_t min_read_size;
+    size_t max_read_size;
+    float avg_read_size;
+    uint32_t total_read_time_ms;
+    uint32_t max_read_time_ms;
+} read_stats = {
+    .min_read_size = SIZE_MAX,  // Initialize to max value so first read will be smaller
+    .max_read_size = 0,
+    .avg_read_size = 0
+};
+
 // Static instances
 static CircularBuffer circular_buffer;
 static DoubleBuffer double_buffer;
@@ -300,6 +315,7 @@ static void RequestMoreData(void) {
         size_t bytes_read = 0;
         bool read_success = false;
         uint8_t retry_count = 0;
+        uint32_t read_start_time = platform_get_time_ms();
 
         while (!read_success && retry_count < MAX_READ_RETRIES) {
             bytes_read = FileSystem_ReadAudioData(temp_buffer, read_size);
@@ -317,6 +333,22 @@ static void RequestMoreData(void) {
         }
 
         if (read_success) {
+            // Update read statistics
+            uint32_t read_time = platform_get_time_ms() - read_start_time;
+            read_stats.total_bytes_read += bytes_read;
+            read_stats.total_read_operations++;
+               read_stats.min_read_size = (bytes_read < read_stats.min_read_size) ? 
+                                     bytes_read : read_stats.min_read_size;
+            read_stats.max_read_size = (bytes_read > read_stats.max_read_size) ? 
+                                     bytes_read : read_stats.max_read_size;
+            read_stats.total_read_time_ms += read_time;
+            read_stats.max_read_time_ms = (read_time > read_stats.max_read_time_ms) ? 
+                                        read_time : read_stats.max_read_time_ms;
+            
+            // Update moving average of read size
+            read_stats.avg_read_size = (read_stats.avg_read_size * 0.95f) + 
+                                     ((float)bytes_read * 0.05f);
+
             size_t samples_read = bytes_read / sizeof(uint16_t);
             size_t samples_added = 0;
 
@@ -420,4 +452,32 @@ void AudioBuffer_GetThresholdConfig(size_t* low_threshold, size_t* high_threshol
     if (low_threshold) *low_threshold = buffer_config.low_threshold;
     if (high_threshold) *high_threshold = buffer_config.high_threshold;
     if (percentage) *percentage = buffer_config.threshold_percentage;
+}
+
+// Get file read statistics
+void AudioBuffer_GetReadStats(size_t* total_bytes, 
+                            size_t* total_operations,
+                            size_t* min_size,
+                            size_t* max_size,
+                            float* avg_size,
+                            uint32_t* total_time_ms,
+                            uint32_t* max_time_ms) {
+    if (total_bytes) *total_bytes = read_stats.total_bytes_read;
+    if (total_operations) *total_operations = read_stats.total_read_operations;
+    if (min_size) *min_size = read_stats.min_read_size;
+    if (max_size) *max_size = read_stats.max_read_size;
+    if (avg_size) *avg_size = read_stats.avg_read_size;
+    if (total_time_ms) *total_time_ms = read_stats.total_read_time_ms;
+    if (max_time_ms) *max_time_ms = read_stats.max_read_time_ms;
+}
+
+// Reset file read statistics
+void AudioBuffer_ResetReadStats(void) {
+    read_stats.total_bytes_read = 0;
+    read_stats.total_read_operations = 0;
+    read_stats.min_read_size = SIZE_MAX;
+    read_stats.max_read_size = 0;
+    read_stats.avg_read_size = 0;
+    read_stats.total_read_time_ms = 0;
+    read_stats.max_read_time_ms = 0;
 }

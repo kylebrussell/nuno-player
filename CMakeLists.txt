@@ -34,25 +34,32 @@ if(NOT BUILD_SIM)
   find_package(FreeRTOS REQUIRED)
 endif()
 
-include_directories(
-    "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
-)
-
 # Libraries
 add_library(drivers
     src/drivers/es9038q2m/es9038q2m.c
+)
+target_include_directories(drivers PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
 add_library(core
     src/core/audio/audio_pipeline.c
     src/core/audio/audio_buffer.c
 )
+target_include_directories(core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
 
 add_library(platform
     src/platform/i2c.c
     src/platform/gpio.c
     src/platform/dma.c
+)
+target_include_directories(platform PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
 # Executable Targets
