@@ -40,6 +40,13 @@ static bool probe_flac(FILE* file);
 static size_t read_mp3(void* buffer, size_t size, FILE* file);
 static size_t read_flac(void* buffer, size_t size, FILE* file);
 
+// Include our new format handlers header
+#include "nuno/format_handlers.h"
+#include "nuno/audio_buffer.h"
+
+// Static buffer for MP3 processing
+static uint8_t mp3_probe_buffer[ID3V2_HEADER_SIZE + 4];  // Enough for ID3v2 header + frame header
+
 // Format handler registry
 static FormatHandler format_handlers[] = {
     {".mp3", probe_mp3, read_mp3},
@@ -191,24 +198,64 @@ void FileSystem_CloseFile(void) {
     }
 }
 
-// Format handler stubs - to be implemented fully
+// Updated MP3 format handling implementation
 static bool probe_mp3(FILE* file) {
-    uint8_t header[3];
-    if (fread(header, 1, 3, file) != 3) return false;
+    // Read initial bytes for probing
+    if (fread(mp3_probe_buffer, 1, sizeof(mp3_probe_buffer), file) != sizeof(mp3_probe_buffer)) {
+        fseek(file, 0, SEEK_SET);
+        return false;
+    }
+    
+    // Create temporary AudioBuffer for probing
+    AudioBuffer temp_buffer = {
+        .data = mp3_probe_buffer,
+        .size = sizeof(mp3_probe_buffer),
+        .position = 0
+    };
+    
+    // Use our MP3 format handler to validate the data
+    bool is_valid = process_mp3_data(&temp_buffer);
+    
+    // Reset file position
     fseek(file, 0, SEEK_SET);
-    return (header[0] == 0xFF && (header[1] & 0xE0) == 0xE0);
+    return is_valid;
 }
 
+static size_t read_mp3(void* buffer, size_t size, FILE* file) {
+    size_t bytes_read = fread(buffer, 1, size, file);
+    if (bytes_read == 0) return 0;
+    
+    // Create temporary AudioBuffer for processing
+    AudioBuffer temp_buffer = {
+        .data = buffer,
+        .size = bytes_read,
+        .position = 0
+    };
+    
+    // Process the MP3 data if this is the first read
+    if (ftell(file) == bytes_read) {
+        if (process_mp3_data(&temp_buffer)) {
+            // Adjust the returned size based on any skipped metadata
+            bytes_read -= (temp_buffer.data - (uint8_t*)buffer);
+            
+            // If we skipped some data, read more to fill the buffer
+            if (bytes_read < size) {
+                size_t additional = fread(temp_buffer.data + bytes_read, 1, 
+                                       size - bytes_read, file);
+                bytes_read += additional;
+            }
+        }
+    }
+    
+    return bytes_read;
+}
+
+// Format handler stubs - to be implemented fully
 static bool probe_flac(FILE* file) {
     uint8_t header[4];
     if (fread(header, 1, 4, file) != 4) return false;
     fseek(file, 0, SEEK_SET);
     return (memcmp(header, "fLaC", 4) == 0);
-}
-
-static size_t read_mp3(void* buffer, size_t size, FILE* file) {
-    // Basic implementation - to be enhanced with proper MP3 frame handling
-    return fread(buffer, 1, size, file);
 }
 
 static size_t read_flac(void* buffer, size_t size, FILE* file) {
