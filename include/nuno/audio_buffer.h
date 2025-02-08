@@ -194,4 +194,9 @@ bool AudioBuffer_StartPlayback(void);
  */
 bool AudioBuffer_Flush(bool reset_stats);
 
+// Add these function declarations
+void AudioBuffer_ConfigureSampleRate(uint32_t source_rate, uint32_t target_rate);
+void AudioBuffer_GetSampleRateConfig(uint32_t* source_rate, uint32_t* target_rate, 
+                                   bool* conversion_enabled, float* ratio);
+
 #endif // AUDIO_BUFFER_H

@@ -119,6 +119,19 @@ static struct {
 static CircularBuffer circular_buffer;
 static DoubleBuffer double_buffer;
 
+// Add after other static configurations
+static struct {
+    uint32_t current_sample_rate;
+    uint32_t target_sample_rate;
+    bool sample_rate_conversion_enabled;
+    float conversion_ratio;
+} sample_rate_config = {
+    .current_sample_rate = 44100,  // Default sample rate
+    .target_sample_rate = 44100,   // Default target rate
+    .sample_rate_conversion_enabled = false,
+    .conversion_ratio = 1.0f
+};
+
 // Initialize the audio buffer system
 void AudioBuffer_Init(void) {
     // Initialize circular buffer
@@ -140,6 +153,12 @@ void AudioBuffer_Init(void) {
 
     // Initialize crossfade buffer
     InitializeCrossfadeBuffer();
+
+    // Initialize sample rate configuration
+    sample_rate_config.current_sample_rate = 44100;
+    sample_rate_config.target_sample_rate = 44100;
+    sample_rate_config.sample_rate_conversion_enabled = false;
+    sample_rate_config.conversion_ratio = 1.0f;
 }
 
 // Get next buffer for DMA
@@ -257,52 +276,138 @@ void AudioBuffer_ConfigureCrossfade(size_t fade_length, float curve_factor, bool
     }
 }
 
-// Modify FillBuffer to handle crossfading
+// Add this new function to configure sample rate
+void AudioBuffer_ConfigureSampleRate(uint32_t source_rate, uint32_t target_rate) {
+    if (source_rate == 0 || target_rate == 0) {
+        return;  // Invalid rates
+    }
+    
+    sample_rate_config.current_sample_rate = source_rate;
+    sample_rate_config.target_sample_rate = target_rate;
+    
+    if (source_rate != target_rate) {
+        sample_rate_config.sample_rate_conversion_enabled = true;
+        sample_rate_config.conversion_ratio = (float)target_rate / source_rate;
+        
+        // Adjust buffer thresholds based on sample rate
+        size_t adjusted_low = (size_t)(buffer_config.low_threshold * 
+            sample_rate_config.conversion_ratio);
+        size_t adjusted_high = (size_t)(buffer_config.high_threshold * 
+            sample_rate_config.conversion_ratio);
+        
+        AudioBuffer_ConfigureThresholds(adjusted_low, adjusted_high);
+    } else {
+        sample_rate_config.sample_rate_conversion_enabled = false;
+        sample_rate_config.conversion_ratio = 1.0f;
+    }
+}
+
+// Add getter for sample rate configuration
+void AudioBuffer_GetSampleRateConfig(uint32_t* source_rate, uint32_t* target_rate, 
+                                   bool* conversion_enabled, float* ratio) {
+    if (source_rate) *source_rate = sample_rate_config.current_sample_rate;
+    if (target_rate) *target_rate = sample_rate_config.target_sample_rate;
+    if (conversion_enabled) *conversion_enabled = sample_rate_config.sample_rate_conversion_enabled;
+    if (ratio) *ratio = sample_rate_config.conversion_ratio;
+}
+
+// Modify FillBuffer to handle sample rate conversion
 static bool FillBuffer(uint8_t buffer_index) {
     size_t samples_needed = AUDIO_BUFFER_SIZE;
     uint16_t* target_buffer = double_buffer.buffer[buffer_index];
     
-    if (crossfade_config.enabled && crossfade_config.in_progress) {
-        // Handle crossfade mixing
-        for (size_t i = 0; i < samples_needed; i++) {
-            uint16_t current_sample;
-            if (!CircularBuffer_Remove(&circular_buffer, &current_sample)) {
-                double_buffer.state = BUFFER_STATE_UNDERRUN;
-                return false;
-            }
-            
-            if (crossfade_config.current_position < crossfade_config.fade_length) {
-                float mix_factor = CalculateFadeFactor(
-                    (float)crossfade_config.current_position / crossfade_config.fade_length
-                );
-                target_buffer[i] = MixSamples(
-                    crossfade_buffer.buffer[crossfade_buffer.position],
-                    current_sample,
-                    mix_factor
-                );
-                
-                crossfade_buffer.position++;
-                crossfade_config.current_position++;
-                
-                if (crossfade_config.current_position >= crossfade_config.fade_length) {
-                    crossfade_config.in_progress = false;
+    if (!sample_rate_config.sample_rate_conversion_enabled) {
+        if (crossfade_config.enabled && crossfade_config.in_progress) {
+            // Handle crossfade mixing
+            for (size_t i = 0; i < samples_needed; i++) {
+                uint16_t current_sample;
+                if (!CircularBuffer_Remove(&circular_buffer, &current_sample)) {
+                    double_buffer.state = BUFFER_STATE_UNDERRUN;
+                    return false;
                 }
-            } else {
-                target_buffer[i] = current_sample;
+                
+                if (crossfade_config.current_position < crossfade_config.fade_length) {
+                    float mix_factor = CalculateFadeFactor(
+                        (float)crossfade_config.current_position / crossfade_config.fade_length
+                    );
+                    target_buffer[i] = MixSamples(
+                        crossfade_buffer.buffer[crossfade_buffer.position],
+                        current_sample,
+                        mix_factor
+                    );
+                    
+                    crossfade_buffer.position++;
+                    crossfade_config.current_position++;
+                    
+                    if (crossfade_config.current_position >= crossfade_config.fade_length) {
+                        crossfade_config.in_progress = false;
+                    }
+                } else {
+                    target_buffer[i] = current_sample;
+                }
+            }
+        } else {
+            // Normal buffer filling without crossfade
+            while (samples_needed > 0) {
+                uint16_t sample;
+                if (!CircularBuffer_Remove(&circular_buffer, &sample)) {
+                    double_buffer.state = BUFFER_STATE_UNDERRUN;
+                    return false;
+                }
+                *target_buffer++ = sample;
+                samples_needed--;
             }
         }
     } else {
-        // Normal buffer filling without crossfade
-        while (samples_needed > 0) {
+        // Handle sample rate conversion
+        size_t source_samples = (size_t)(samples_needed / sample_rate_config.conversion_ratio);
+        uint16_t* temp_buffer = (uint16_t*)malloc(source_samples * sizeof(uint16_t));
+        
+        if (!temp_buffer) {
+            error_stats.read_errors++;
+            return false;
+        }
+        
+        // Read source samples
+        size_t samples_read = 0;
+        while (samples_read < source_samples) {
             uint16_t sample;
             if (!CircularBuffer_Remove(&circular_buffer, &sample)) {
+                free(temp_buffer);
                 double_buffer.state = BUFFER_STATE_UNDERRUN;
                 return false;
             }
-            *target_buffer++ = sample;
-            samples_needed--;
+            temp_buffer[samples_read++] = sample;
         }
+        
+        // Perform sample rate conversion
+        for (size_t i = 0; i < samples_needed; i++) {
+            float source_index = i / sample_rate_config.conversion_ratio;
+            size_t index1 = (size_t)source_index;
+            size_t index2 = index1 + 1;
+            
+            if (index2 >= source_samples) {
+                index2 = index1;
+            }
+            
+            float fraction = source_index - index1;
+            
+            // Linear interpolation between samples
+            int32_t sample1 = (int16_t)temp_buffer[index1];
+            int32_t sample2 = (int16_t)temp_buffer[index2];
+            int32_t interpolated = (int32_t)(sample1 * (1.0f - fraction) + 
+                                           sample2 * fraction);
+            
+            // Clamp to int16_t range
+            if (interpolated > 32767) interpolated = 32767;
+            if (interpolated < -32768) interpolated = -32768;
+            
+            target_buffer[i] = (uint16_t)interpolated;
+        }
+        
+        free(temp_buffer);
     }
+    
     return true;
 }
 

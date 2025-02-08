@@ -1,5 +1,4 @@
 src/core/audio/audio_buffer.c:
-- Add support for variable sample rates
 - Add support for different bit depths
 - Add power-saving mode support
 
