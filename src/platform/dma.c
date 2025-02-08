@@ -5,58 +5,10 @@
 
 // DMA Handle
 DMA_HandleTypeDef hdma_audio;
-
-// Audio buffer configuration
-#define AUDIO_BUFFER_SIZE 4096
-uint16_t audio_buffer[AUDIO_BUFFER_SIZE];
 volatile bool dma_transfer_complete = false;
-
-static CircularBuffer circular_buffer;
-
-// Initialize Circular Buffer
-void CircularBuffer_Init(CircularBuffer *cb, uint16_t *buffer, size_t size) {
-    cb->buffer = buffer;
-    cb->size = size;
-    cb->head = 0;
-    cb->tail = 0;
-    cb->is_full = false;
-}
-
-// Add data to Circular Buffer
-bool CircularBuffer_Add(CircularBuffer *cb, uint16_t data) {
-    if (cb->is_full) {
-        // Buffer is full
-        return false;
-    }
-    cb->buffer[cb->head] = data;
-    cb->head = (cb->head + 1) % cb->size;
-
-    if (cb->head == cb->tail) {
-        cb->is_full = true;
-    }
-
-    return true;
-}
-
-// Remove data from Circular Buffer
-bool CircularBuffer_Remove(CircularBuffer *cb, uint16_t *data) {
-    if (cb->head == cb->tail && !cb->is_full) {
-        // Buffer is empty
-        return false;
-    }
-
-    *data = cb->buffer[cb->tail];
-    cb->tail = (cb->tail + 1) % cb->size;
-    cb->is_full = false;
-
-    return true;
-}
 
 // Initialize DMA for audio streaming
 bool DMA_Init(void) {
-    // Initialize Circular Buffer
-    CircularBuffer_Init(&circular_buffer, audio_buffer, AUDIO_BUFFER_SIZE);
-
     // Enable DMA clock
     __HAL_RCC_DMA1_CLK_ENABLE();
 
