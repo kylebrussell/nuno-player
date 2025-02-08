@@ -48,9 +48,14 @@ tests/mocks/stm32h7xx_hal_mock.c:
 - Create mock timer functions
 - Add mock interrupt handling
 
-Add to project:
-- git submodule add https://github.com/ARM-software/CMSIS_5.git external/CMSIS
-- git submodule add https://github.com/FreeRTOS/FreeRTOS-Kernel.git external/FreeRTOS
+Build System Integration:
+- Integrate FreeRTOS kernel into CMake build:
+  - Add FreeRTOS source files to build targets
+  - Configure FreeRTOS kernel settings
+  - Set up portable layer for target architecture
+  - Add FreeRTOS include paths
+  - Configure heap implementation selection
+  - Set up RTOS configuration header
 
 src/core/audio/format_decoder.h:
 - Define decoder interface for MP3 audio format
