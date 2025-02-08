@@ -157,4 +157,13 @@ bool AudioBuffer_PrepareGaplessTransition(void);
  */
 bool AudioBuffer_StartPlayback(void);
 
+/**
+ * Flushes all audio buffers and resets the buffer state.
+ * Used when seeking to a new position in the audio file.
+ * 
+ * @param reset_stats If true, also resets buffer statistics
+ * @return true if flush was successful, false otherwise
+ */
+bool AudioBuffer_Flush(bool reset_stats);
+
 #endif // AUDIO_BUFFER_H

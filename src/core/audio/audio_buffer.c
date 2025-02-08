@@ -148,9 +148,11 @@ void AudioBuffer_GetReadChunkConfig(size_t* min_size, size_t* max_size, size_t* 
 bool AudioBuffer_StartPlayback(void) {
     if (double_buffer.state == BUFFER_STATE_EMPTY) {
         double_buffer.state = BUFFER_STATE_PRELOADING;
+        double_buffer.samples_played = 0;  // Reset samples played counter
         
         // Preload both buffers
         if (!FillBuffer(0) || !FillBuffer(1)) {
+            double_buffer.state = BUFFER_STATE_EMPTY;  // Reset state on failure
             return false;
         }
         
@@ -159,7 +161,11 @@ bool AudioBuffer_StartPlayback(void) {
         double_buffer.state = BUFFER_STATE_READY;
         
         // Start DMA transfer with first buffer
-        DMA_StartTransfer(double_buffer.buffer[0], AUDIO_BUFFER_SIZE);
+        if (!DMA_StartTransfer(double_buffer.buffer[0], AUDIO_BUFFER_SIZE)) {
+            double_buffer.state = BUFFER_STATE_EMPTY;
+            return false;
+        }
+        
         double_buffer.state = BUFFER_STATE_PLAYING;
         return true;
     }
@@ -480,4 +486,32 @@ void AudioBuffer_ResetReadStats(void) {
     read_stats.avg_read_size = 0;
     read_stats.total_read_time_ms = 0;
     read_stats.max_read_time_ms = 0;
+}
+
+bool AudioBuffer_Flush(bool reset_stats) {
+    // Stop any ongoing DMA transfer
+    DMA_StopTransfer();
+    
+    // Clear circular buffer
+    circular_buffer.head = 0;
+    circular_buffer.tail = 0;
+    circular_buffer.is_full = false;
+    
+    // Clear double buffer
+    memset(double_buffer.buffer[0], 0, AUDIO_BUFFER_SIZE * sizeof(uint16_t));
+    memset(double_buffer.buffer[1], 0, AUDIO_BUFFER_SIZE * sizeof(uint16_t));
+    double_buffer.buffer_ready[0] = false;
+    double_buffer.buffer_ready[1] = false;
+    double_buffer.active_buffer = 0;
+    double_buffer.state = BUFFER_STATE_EMPTY;
+    double_buffer.gapless_transition = false;
+    
+    // Optionally reset statistics
+    if (reset_stats) {
+        AudioBuffer_ResetBufferStats();
+        AudioBuffer_ResetErrorStats();
+        AudioBuffer_ResetReadStats();
+    }
+    
+    return true;
 }
