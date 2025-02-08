@@ -1,7 +1,7 @@
-#include "audio_pipeline.h"
-#include "audio_buffer.h"
-#include "es9038q2m.h"
-#include "platform.h"
+#include "nuno/audio_pipeline.h"
+#include "nuno/audio_buffer.h"
+#include "nuno/es9038q2m.h"
+#include "nuno/platform.h"
 #include <string.h>
 
 

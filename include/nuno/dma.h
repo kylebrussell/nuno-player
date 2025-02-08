@@ -1,6 +1,7 @@
-#ifndef NUNO_DMA_H
-#define NUNO_DMA_H
+#ifndef DMA_H
+#define DMA_H
 
+#include "nuno/hal_types.h"
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -21,4 +22,4 @@ void DMA_StopTransfer(void);
 void HAL_DMA_TxCpltCallback(DMA_HandleTypeDef *hdma);
 void HAL_DMA_TxHalfCpltCallback(DMA_HandleTypeDef *hdma);
 
-#endif // NUNO_DMA_H
+#endif // DMA_H

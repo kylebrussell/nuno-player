@@ -81,6 +81,7 @@ if(NOT BUILD_SIM)
 endif()
 
 if(BUILD_SIM)
+  add_compile_definitions(BUILD_SIM)
   add_executable(nuno-sim
       src/platform/sim/main_ui_test.c
       src/platform/sim/sdl_mock_display.c
@@ -90,10 +91,7 @@ if(BUILD_SIM)
       "${CMAKE_CURRENT_SOURCE_DIR}/src"
   )
   target_link_libraries(nuno-sim
-      drivers
       core
-      platform
-      freertos_kernel
       SDL2::SDL2
   )
 endif()
