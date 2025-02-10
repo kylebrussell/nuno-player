@@ -51,14 +51,19 @@ Build System Integration:
   - Add FreeRTOS include paths
   - Configure heap implementation selection
   - Set up RTOS configuration header
+  - Add minimp3 library:
+    - Download minimp3.h and minimp3_ex.h
+    - Add to external/minimp3/
+    - Update CMake to include minimp3 headers
+    - Add license file and attribution
 
-src/core/audio/format_decoder.h:
-- Define decoder interface for MP3 audio format
+include/nuno/format_decoder.h:
 - Define buffer requirements per format
 - Create error handling structures
 
 src/core/audio/format_decoder.c:
-- Implement MP3 decoder integration
+- Implement FLAC decoder integration
+- Implement more robust error handling
 
 src/core/database/db_init.c:
 - Implement SQLite database initialization
