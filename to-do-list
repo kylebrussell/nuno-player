@@ -1,5 +1,29 @@
 src/core/audio/audio_buffer.c:
-- Add power-saving mode support
+- Create an explicit "update" or "tick" function (e.g., AudioBuffer_Update()) that the pipeline can call periodically or after DMA callbacks, to keep buffer state transitions in sync with pipeline state.
+- Add a new AudioBuffer_Seek(position_in_samples) to handle partial flush or refill when seeking. This should invalidate or reset buffer contents, call FileSystem_Seek(), then preload from the new offset.
+
+src/core/audio/audio_pipeline.c:
+- Implement end-of-playlist handling
+- Improve coordination between pipeline states (PLAYING, PAUSED, CROSSFADE_IN_PROGRESS) and the buffer’s states, so they never drift out of alignment.
+- Handle real-time sample rate or bit-depth reconfiguration: if the user changes to a new track with different format mid-playback, drain or re-init the buffer before continuing.
+- Fade out smoothly on AudioPipeline_Stop() to avoid abrupt audio pops, especially in a “premium” user experience scenario.
+- Decide how the pipeline calls AudioBuffer_Update(): in the main loop, in an RTOS task, or after each half/full DMA transfer. A unified approach avoids partial or duplicate updates.
+- Integrate seeking logic more tightly with AudioBuffer_Seek(). Possibly define a pipeline-level “seek to sample/frame” call that stops DMA, re-seeks, and restarts in a seamless flow.
+
+src/core/audio/format_handlers.c:
+- Add FLAC frame decoding support
+- Add FLAC metadata block parsing
+- Implement frame-aligned seeking for both formats
+- Add support for different FLAC compression levels
+- Implement proper error handling for corrupt frames
+
+include/nuno/format_decoder.h:
+- Define buffer requirements per format
+- Create error handling structures
+
+src/core/audio/format_decoder.c:
+- Implement FLAC decoder integration
+- Implement more robust error handling
 
 tests/core/filesystem_tests.c:
 - Create test suite for filesystem operations
@@ -11,23 +35,15 @@ tests/core/filesystem_tests.c:
 - Add stress tests for concurrent operations
 - Add performance benchmarks for read operations
 
-src/core/audio/format_handlers.c:
-- Add FLAC frame decoding support
-- Add FLAC metadata block parsing
-- Implement frame-aligned seeking for both formats
-- Add support for different FLAC compression levels
-- Implement proper error handling for corrupt frames
-
-src/core/audio/audio_pipeline.c:
-- Implement end-of-playlist handling
-
 src/platform/main.c:
-- Create main application entry point
-- Initialize system clocks
-- Configure peripherals
-- Start FreeRTOS scheduler
-- Initialize audio subsystem
-- Set up error handling
+- Implement power management initialization
+- Add system diagnostics/health monitoring
+- Create UI task for menu handling
+- Add USB initialization
+- Implement graceful shutdown handling
+- Add system recovery from hard faults
+- Create task monitoring system
+- Configure DMA priorities and interrupt levels
 
 tests/platform/platform_tests.c:
 - Buffer management tests
@@ -57,14 +73,6 @@ Build System Integration:
     - Update CMake to include minimp3 headers
     - Add license file and attribution
 
-include/nuno/format_decoder.h:
-- Define buffer requirements per format
-- Create error handling structures
-
-src/core/audio/format_decoder.c:
-- Implement FLAC decoder integration
-- Implement more robust error handling
-
 src/core/database/db_init.c:
 - Implement SQLite database initialization
 - Create tables for songs, artists, albums
@@ -72,7 +80,7 @@ src/core/database/db_init.c:
 - Implement playlist management
 - Add play history tracking
 
-src/platform/power.h:
+include/nuno/power.h:
 - Define power states
 - Add battery monitoring interface
 - Define charging state management
