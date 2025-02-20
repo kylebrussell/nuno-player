@@ -212,4 +212,18 @@ void AudioBuffer_GetSampleFormat(uint8_t* bits_per_sample, bool* is_float,
  */
 void AudioBuffer_Update(void);
 
+/**
+ * @brief Seek to a specific sample position in the audio stream
+ * 
+ * This function will:
+ * 1. Stop ongoing transfers
+ * 2. Seek to the specified position in the file
+ * 3. Reset and refill buffers from the new position
+ * 4. Restart playback if it was previously playing
+ * 
+ * @param position_in_samples The target sample position to seek to
+ * @return true if seek was successful, false otherwise
+ */
+bool AudioBuffer_Seek(size_t position_in_samples);
+
 #endif // AUDIO_BUFFER_H

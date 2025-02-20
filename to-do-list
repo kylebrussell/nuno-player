@@ -1,5 +1,5 @@
 src/core/audio/audio_buffer.c:
-- Add a new AudioBuffer_Seek(position_in_samples) to handle partial flush or refill when seeking. This should invalidate or reset buffer contents, call FileSystem_Seek(), then preload from the new offset.
+
 
 src/core/audio/audio_pipeline.c:
 - Decide how the pipeline calls AudioBuffer_Update(): in the main loop, in an RTOS task, or after each half/full DMA transfer. A unified approach avoids partial or duplicate updates.

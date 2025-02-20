@@ -1063,3 +1063,53 @@ void AudioBuffer_Update(void) {
         last_update_time = current_time;
     }
 }
+
+bool AudioBuffer_Seek(size_t position_in_samples) {
+    // Stop any ongoing DMA transfer
+    DMA_StopTransfer();
+    
+    // Calculate byte offset based on sample format
+    size_t bytes_per_sample = sample_rate_config.bytes_per_sample;
+    size_t byte_position = position_in_samples * bytes_per_sample;
+    
+    // Seek in filesystem
+    if (!FileSystem_Seek(byte_position)) {
+        return false;
+    }
+    
+    // Partially flush buffers - keep allocated memory but reset pointers
+    circular_buffer.head = 0;
+    circular_buffer.tail = 0;
+    circular_buffer.is_full = false;
+    
+    double_buffer.buffer_ready[0] = false;
+    double_buffer.buffer_ready[1] = false;
+    double_buffer.active_buffer = 0;
+    double_buffer.samples_played = position_in_samples;
+    double_buffer.cache_valid_bytes = 0;
+    
+    // Reset crossfade state if active
+    if (crossfade_config.in_progress) {
+        crossfade_config.in_progress = false;
+        crossfade_config.current_position = 0;
+        crossfade_buffer.position = 0;
+        crossfade_buffer.ready = false;
+    }
+    
+    // Preload buffers from new position
+    if (!FillBuffer(0) || !FillBuffer(1)) {
+        return false;
+    }
+    
+    double_buffer.buffer_ready[0] = true;
+    double_buffer.buffer_ready[1] = true;
+    
+    // Restart DMA from new position if we were playing
+    if (double_buffer.state == BUFFER_STATE_PLAYING) {
+        if (!DMA_StartTransfer(double_buffer.buffer[0], AUDIO_BUFFER_SIZE)) {
+            return false;
+        }
+    }
+    
+    return true;
+}
