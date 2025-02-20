@@ -1,14 +1,13 @@
 src/core/audio/audio_buffer.c:
-- Create an explicit "update" or "tick" function (e.g., AudioBuffer_Update()) that the pipeline can call periodically or after DMA callbacks, to keep buffer state transitions in sync with pipeline state.
 - Add a new AudioBuffer_Seek(position_in_samples) to handle partial flush or refill when seeking. This should invalidate or reset buffer contents, call FileSystem_Seek(), then preload from the new offset.
 
 src/core/audio/audio_pipeline.c:
-- Implement end-of-playlist handling
-- Improve coordination between pipeline states (PLAYING, PAUSED, CROSSFADE_IN_PROGRESS) and the buffer’s states, so they never drift out of alignment.
-- Handle real-time sample rate or bit-depth reconfiguration: if the user changes to a new track with different format mid-playback, drain or re-init the buffer before continuing.
-- Fade out smoothly on AudioPipeline_Stop() to avoid abrupt audio pops, especially in a “premium” user experience scenario.
 - Decide how the pipeline calls AudioBuffer_Update(): in the main loop, in an RTOS task, or after each half/full DMA transfer. A unified approach avoids partial or duplicate updates.
+- Improve coordination between pipeline states (PLAYING, PAUSED, CROSSFADE_IN_PROGRESS) and the buffer’s states, so they never drift out of alignment.
 - Integrate seeking logic more tightly with AudioBuffer_Seek(). Possibly define a pipeline-level “seek to sample/frame” call that stops DMA, re-seeks, and restarts in a seamless flow.
+- Fade out smoothly on AudioPipeline_Stop() to avoid abrupt audio pops, especially in a “premium” user experience scenario.
+- Implement end-of-playlist handling
+- Handle real-time sample rate or bit-depth reconfiguration: if the user changes to a new track with different format mid-playback, drain or re-init the buffer before continuing.
 
 src/core/audio/format_handlers.c:
 - Add FLAC frame decoding support

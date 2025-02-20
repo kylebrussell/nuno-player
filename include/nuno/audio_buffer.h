@@ -203,4 +203,13 @@ void AudioBuffer_ConfigureSampleFormat(uint8_t bits_per_sample, bool is_float, b
 void AudioBuffer_GetSampleFormat(uint8_t* bits_per_sample, bool* is_float, 
                                bool* is_signed, uint8_t* bytes_per_sample);
 
+/**
+ * @brief Update buffer state and handle transitions
+ * 
+ * This function should be called periodically to maintain buffer state,
+ * handle transitions, and update statistics. It can be called from the
+ * main audio processing loop or after DMA callbacks.
+ */
+void AudioBuffer_Update(void);
+
 #endif // AUDIO_BUFFER_H

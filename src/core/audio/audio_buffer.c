@@ -1003,3 +1003,63 @@ static bool CircularBuffer_Remove(CircularBuffer* cb, void* sample) {
     
     return true;
 }
+
+// Update buffer state and handle transitions
+void AudioBuffer_Update(void) {
+    // Check buffer levels and request more data if needed
+    if (AudioBuffer_IsUnderThreshold()) {
+        RequestMoreData();
+    }
+
+    // Update buffer utilization statistics
+    UpdateBufferUtilization();
+
+    // Handle state transitions
+    switch (double_buffer.state) {
+        case BUFFER_STATE_PRELOADING:
+            // Check if preload is complete
+            if (double_buffer.buffer_ready[0] && double_buffer.buffer_ready[1]) {
+                double_buffer.state = BUFFER_STATE_READY;
+            }
+            break;
+
+        case BUFFER_STATE_PLAYING:
+            // Handle crossfade if in progress
+            if (crossfade_config.enabled && crossfade_config.in_progress) {
+                if (crossfade_config.current_position >= crossfade_config.fade_length) {
+                    crossfade_config.in_progress = false;
+                    crossfade_config.current_position = 0;
+                }
+            }
+
+            // Handle gapless transition if pending
+            if (double_buffer.gapless_transition) {
+                HandleGaplessTransition();
+            }
+            break;
+
+        case BUFFER_STATE_UNDERRUN:
+            // Attempt recovery from underrun
+            if (circular_buffer.head != circular_buffer.tail || circular_buffer.is_full) {
+                // We have some data, try to resume
+                if (FillBuffer(double_buffer.active_buffer)) {
+                    double_buffer.state = BUFFER_STATE_PLAYING;
+                    double_buffer.buffer_ready[double_buffer.active_buffer] = true;
+                }
+            }
+            break;
+
+        default:
+            break;
+    }
+
+    // Update performance metrics
+    static uint32_t last_update_time = 0;
+    uint32_t current_time = platform_get_time_ms();
+    
+    if (current_time - last_update_time >= 1000) {  // Update stats every second
+        buffer_stats.average_buffer_utilization = 
+            (float)(circular_buffer.head - circular_buffer.tail) / circular_buffer.size;
+        last_update_time = current_time;
+    }
+}
