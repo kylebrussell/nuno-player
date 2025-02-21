@@ -6,19 +6,82 @@ src/core/audio/audio_pipeline.c:
 - Handle real-time sample rate or bit-depth reconfiguration: if the user changes to a new track with different format mid-playback, drain or re-init the buffer before continuing.
 
 src/core/audio/format_handlers.c:
-- Add FLAC frame decoding support
-- Add FLAC metadata block parsing
-- Implement frame-aligned seeking for both formats
-- Add support for different FLAC compression levels
-- Implement proper error handling for corrupt frames
+- Add FLAC sync block detection (0xFFF8)
+- Implement FLAC metadata block parsing:
+  - STREAMINFO block parsing (required)
+  - SEEKTABLE block parsing (for seeking)
+  - VORBIS_COMMENT block parsing (for tags)
+  - PICTURE block parsing (optional)
+- Add FLAC frame header parsing:
+  - Frame sync code validation
+  - Block size parsing
+  - Sample rate parsing
+  - Channel assignment parsing
+  - Sample size parsing
+  - Frame number/sample number parsing
+- Implement CRC checking for frame validation
+- Add helper functions for reading variable-length rice coding parameters
+- Create utilities for handling FLAC's fixed/LPC prediction
+- Add residual coding parsing support
+
+include/nuno/format_handlers.h:
+- Define FLAC-specific structures:
+  - FLAC_StreamInfo structure
+  - FLAC_FrameHeader structure
+  - FLAC_Subframe structure
+  - FLAC_SeekTable structure
+- Add FLAC-related constants:
+  - Block type definitions
+  - Frame sync code
+  - Sample size constants
+  - Channel assignment values
+- Define interfaces for FLAC operations:
+  - Metadata block parsing functions
+  - Frame parsing functions
+  - Subframe parsing functions
+  - CRC calculation utilities
 
 include/nuno/format_decoder.h:
 - Define buffer requirements per format
 - Create error handling structures
+- Add FLAC-specific error codes and handling:
+  - Invalid FLAC stream
+  - Unsupported FLAC feature
+  - Frame decode error
+  - CRC mismatch
+- Define decoder configuration and capabilities:
+  - Memory buffer size requirements per format
+  - Format-specific configuration options
+  - Seeking behavior settings
+  - Error handling preferences
+  - Maximum supported sample rates
+  - Supported bit depths
+  - Seeking capabilities
 
 src/core/audio/format_decoder.c:
-- Implement FLAC decoder integration
-- Implement more robust error handling
+- Add FLAC decoder state management:
+  - Track current frame position
+  - Store stream parameters
+  - Maintain decode buffer state
+- Implement FLAC format detection in format_decoder_open
+- Add FLAC-specific initialization:
+  - Allocate decode buffers
+  - Initialize subframe buffers
+  - Set up prediction contexts
+- Create FLAC frame decoding pipeline:
+  - Frame synchronization
+  - Header decoding
+  - Subframe decoding
+  - Sample reconstruction
+  - Inter-channel decorrelation
+- Implement efficient sample format conversion:
+  - FLAC internal format to float conversion
+  - Handle different bit depths (16/24 bit)
+- Add seeking support:
+  - Use SEEKTABLE if available
+  - Implement binary search seeking if no SEEKTABLE
+  - Ensure frame alignment when seeking
+- Implement proper cleanup in format_decoder_close for FLAC resources
 
 tests/core/filesystem_tests.c:
 - Create test suite for filesystem operations
@@ -33,7 +96,6 @@ tests/core/filesystem_tests.c:
 src/platform/main.c:
 - Implement power management initialization
 - Add system diagnostics/health monitoring
-- Create UI task for menu handling
 - Add USB initialization
 - Implement graceful shutdown handling
 - Add system recovery from hard faults
@@ -67,6 +129,13 @@ Build System Integration:
     - Add to external/minimp3/
     - Update CMake to include minimp3 headers
     - Add license file and attribution
+  - Add libFLAC dependency:
+  - Download libFLAC source
+  - Add to external/libflac/
+  - Configure build options
+  - Add include paths
+  - Update CMake configuration
+  - Add license and attribution  
 
 src/core/database/db_init.c:
 - Implement SQLite database initialization
@@ -109,22 +178,38 @@ tests/ui/menu_tests.c:
 - Add stress tests for UI
 - Test click wheel responsiveness
 
+tests/core/audio/format_handlers_tests.c:
+- Add FLAC metadata parsing tests:
+  - Test all metadata block types
+  - Test invalid metadata blocks
+  - Test metadata block chaining
+- Create frame parsing tests:
+  - Test various frame configurations
+  - Test invalid frame headers
+  - Test CRC validation
+- Add subframe decoding tests:
+  - Test constant subframes
+  - Test fixed prediction
+  - Test LPC prediction
+  - Test residual decoding
+- Implement seeking tests:
+  - Test seek table accuracy
+  - Test binary search seeking
+  - Test seek to specific samples
 
-# Focus Areas by Priority
-
-High Priority:
-- Audio pipeline implementation
-- Click wheel input processing
-- Basic menu navigation
-- DAC driver implementation
-
-Medium Priority:
-- Power management
-- Database initialization
-- Format decoders
-- USB communication
-
-Low Priority:
-- Advanced UI animations
-- Extended playback features
-- Additional audio format support
+tests/core/audio/format_decoder_tests.c:
+- Add FLAC decoder initialization tests:
+  - Test valid file detection
+  - Test invalid file handling
+  - Test resource allocation
+- Create decoding pipeline tests:
+  - Test full frame decoding
+  - Test sample reconstruction
+  - Test channel correlation
+- Implement format conversion tests:
+  - Test different bit depth handling
+  - Test float conversion accuracy
+- Add performance benchmarks:
+  - Measure decode speed
+  - Compare memory usage
+  - Profile seeking performance

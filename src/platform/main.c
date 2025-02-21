@@ -5,15 +5,22 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "ui_tasks.h"       // For UI functions and definitions
+#include "ui_state.h"       // UI state and menu definitions
+#include "menu_renderer.h"  // UI renderer interface
+
 // Error handler function prototype
 static void Error_Handler(void);
 
 // Audio processing task prototype
 static void AudioProcessingTask(void *parameters);
+static void UITask(void *parameters);
 
 // Constants for task configuration
 #define AUDIO_TASK_STACK_SIZE     (configMINIMAL_STACK_SIZE * 2)
 #define AUDIO_TASK_PRIORITY       (tskIDLE_PRIORITY + 2)
+#define UI_TASK_STACK_SIZE        (configMINIMAL_STACK_SIZE * 3)
+#define UI_TASK_PRIORITY          (tskIDLE_PRIORITY + 1)
 
 int main(void) {
     // Initialize HAL Library
@@ -37,6 +44,15 @@ int main(void) {
         Error_Handler();
     }
 
+    // (Optional) Initialize display hardware here so that
+    // Display_Clear, Display_Update, etc. are ready to use.
+    // For example: Display_Init();
+
+    // If your menu renderer has its own initialization routine:
+    if (!MenuRenderer_Init()) {
+        Error_Handler();
+    }
+
     // Create the audio processing task
     TaskHandle_t audioTaskHandle;
     BaseType_t xReturned = xTaskCreate(
@@ -48,6 +64,20 @@ int main(void) {
         &audioTaskHandle
     );
 
+    if (xReturned != pdPASS) {
+        Error_Handler();
+    }
+
+    // Create the UI task that handles UI events and rendering
+    TaskHandle_t uiTaskHandle;
+    xReturned = xTaskCreate(
+        UITask,
+        "UI_Task",
+        UI_TASK_STACK_SIZE,
+        NULL,
+        UI_TASK_PRIORITY,
+        &uiTaskHandle
+    );
     if (xReturned != pdPASS) {
         Error_Handler();
     }
@@ -89,19 +119,47 @@ static void AudioProcessingTask(void *parameters) {
     }
 }
 
+// The UI task integrates UI event processing and renders the UI at a fixed interval.
+static void UITask(void *parameters) {
+    (void)parameters; // Prevent unused parameter warning
+
+    UIState uiState;
+    // Initialize UI state using our UI system setup function
+    initUIState(&uiState);
+
+    // Optional: Initialize additional UI components (e.g., track info, volume) here.
+
+    for (;;) {
+        // Get the current time (in milliseconds) from the FreeRTOS tick count
+        // Adjust with your tick frequency (if configTICK_RATE_HZ is not 1000)
+        uint32_t currentTime = xTaskGetTickCount() * (1000 / configTICK_RATE_HZ);
+
+        // Process any UI events (from buttons, rotation, etc.)
+        // In a real application, events might come from an ISR or queue.
+        processUIEvents(&uiState, currentTime);
+
+        // Render the UI with the current state and animations
+        MenuRenderer_Render(&uiState, currentTime);
+
+        // Delay to limit the refresh rate. Adjust delay as needed for smooth animations.
+        vTaskDelay(pdMS_TO_TICKS(16)); // ~60 FPS refresh rate
+    }
+}
+
 static void Error_Handler(void) {
     // Disable interrupts
     __disable_irq();
     
-    // TODO: Add error indication (e.g., LED blinking)
+    // Optional: Indicate the error (e.g., blink an LED)
     
     // Infinite loop
     while (1) {
         // Could add watchdog reset here if needed
+    
     }
 }
 
-// FreeRTOS required callback
+// FreeRTOS required callback for stack overflow handling
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
     (void)xTask;
     (void)pcTaskName;
