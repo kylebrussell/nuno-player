@@ -389,3 +389,39 @@ void AudioPipeline_NotifyCrossfadeComplete(void) {
         updatePipelineState(PIPELINE_STATE_PLAYING);
     }
 }
+
+bool AudioPipeline_Seek(size_t sample_position) {
+    // Save current state
+    PipelineState previous_state = pipeline.state;
+    
+    // Stop DMA transfers
+    DMA_StopTransfer();
+    
+    // If we were in a crossfade, cancel it
+    if (pipeline.state == PIPELINE_STATE_CROSSFADE_IN_PROGRESS) {
+        pipeline.transition_pending = false;
+        pipeline.transition_crossfade_ratio = 0.0f;
+    }
+    
+    // Temporarily set state to paused during seek
+    updatePipelineState(PIPELINE_STATE_PAUSED);
+    
+    // Perform the seek operation in the buffer system
+    if (!AudioBuffer_Seek(sample_position)) {
+        // If seek failed, try to restore previous state
+        if (previous_state == PIPELINE_STATE_PLAYING) {
+            AudioPipeline_Play();
+        }
+        return false;
+    }
+    
+    // If we were previously playing, restart playback
+    if (previous_state == PIPELINE_STATE_PLAYING) {
+        if (!AudioBuffer_StartPlayback()) {
+            return false;
+        }
+        updatePipelineState(PIPELINE_STATE_PLAYING);
+    }
+    
+    return true;
+}

@@ -2,7 +2,6 @@ src/core/audio/audio_buffer.c:
 
 
 src/core/audio/audio_pipeline.c:
-- Integrate seeking logic more tightly with AudioBuffer_Seek(). Possibly define a pipeline-level “seek to sample/frame” call that stops DMA, re-seeks, and restarts in a seamless flow.
 - Fade out smoothly on AudioPipeline_Stop() to avoid abrupt audio pops, especially in a “premium” user experience scenario.
 - Implement end-of-playlist handling
 - Handle real-time sample rate or bit-depth reconfiguration: if the user changes to a new track with different format mid-playback, drain or re-init the buffer before continuing.

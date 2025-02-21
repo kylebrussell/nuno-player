@@ -114,4 +114,17 @@ void AudioPipeline_UnregisterStateCallback(void);
  */
 void AudioPipeline_ProcessCrossfade(int16_t* buffer, size_t samples);
 
+/**
+ * @brief Seek to a specific sample position in the audio stream
+ * 
+ * Performs a coordinated seek operation that:
+ * 1. Safely stops ongoing playback
+ * 2. Seeks the underlying buffer system
+ * 3. Restarts playback if previously playing
+ * 
+ * @param sample_position Target sample position to seek to
+ * @return true if seek operation was successful, false otherwise
+ */
+bool AudioPipeline_Seek(size_t sample_position);
+
 #endif /* AUDIO_PIPELINE_H */
