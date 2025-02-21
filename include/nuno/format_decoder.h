@@ -5,7 +5,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// Forward declarations
 typedef struct FormatDecoder FormatDecoder;
+typedef struct AudioFormatInfo AudioFormatInfo;
 
 /**
  * Error codes for format decoder operations
@@ -19,6 +21,10 @@ enum FormatDecoderError {
     FD_ERROR_MEMORY,
     FD_ERROR_DECODE
 };
+
+// Format detection function (implemented in format_handlers.c)
+enum FormatDecoderError detect_audio_format(const uint8_t* data, size_t size, 
+                                          AudioFormatInfo* format_info);
 
 /**
  * Creates a new format decoder instance

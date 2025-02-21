@@ -1,5 +1,6 @@
 #include <nuno/audio_buffer.h>
 #include <nuno/audio_pipeline.h>
+#include <nuno/format_decoder.h>
 #include <string.h>
 
 #define MP3_SYNC_WORD 0xFFF
@@ -130,40 +131,47 @@ static bool find_vbr_header(const uint8_t* frame_data, size_t length, VBRHeader*
     return false;
 }
 
-bool process_mp3_data(AudioBuffer* buffer) {
-    if (!buffer || !buffer->data || buffer->size < ID3V2_HEADER_SIZE) return false;
+/**
+ * @brief Detects and validates audio format metadata
+ * @param data Raw audio file data
+ * @param size Size of the data buffer
+ * @param format_info Output parameter for format information
+ * @return Format detection error code
+ */
+enum FormatDecoderError detect_audio_format(const uint8_t* data, size_t size, 
+                                          AudioFormatInfo* format_info) {
+    if (!data || !format_info || size < ID3V2_HEADER_SIZE) {
+        return FD_ERROR_INVALID_PARAM;
+    }
 
     size_t data_offset = 0;
     ID3v2Header id3v2;
 
     // Check for ID3v2 tag
-    if (parse_id3v2_header(buffer->data, &id3v2)) {
+    if (parse_id3v2_header(data, &id3v2)) {
         data_offset = ID3V2_HEADER_SIZE + id3v2.size;
     }
 
     // Find first valid MP3 frame
-    bool frame_found = false;
     MP3FrameHeader frame_header;
     VBRHeader vbr_header;
+    bool frame_found = false;
     
-    while (data_offset + 4 <= buffer->size) {
-        if (parse_mp3_frame_header(buffer->data + data_offset, &frame_header)) {
+    while (data_offset + 4 <= size) {
+        if (parse_mp3_frame_header(data + data_offset, &frame_header)) {
             frame_found = true;
             
-            // Check for VBR header in first frame
-            if (data_offset + 192 <= buffer->size) {  // Typical minimum frame size
-                find_vbr_header(buffer->data + data_offset, 192, &vbr_header);
-            }
+            // Store format information
+            format_info->offset = data_offset;
+            format_info->has_vbr = find_vbr_header(data + data_offset, 
+                                                  size - data_offset, 
+                                                  &vbr_header);
+            format_info->channel_mode = frame_header.channel_mode;
+            format_info->sampling_rate = get_mp3_sample_rate(frame_header.sampling_rate);
             break;
         }
         data_offset++;
     }
 
-    if (!frame_found) return false;
-
-    // Update buffer to point to first frame
-    buffer->data += data_offset;
-    buffer->size -= data_offset;
-
-    return true;
+    return frame_found ? FD_ERROR_NONE : FD_ERROR_INVALID_FORMAT;
 }

@@ -4,6 +4,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Move format info struct definition to header file
+struct AudioFormatInfo {
+    size_t offset;          // Offset to first audio frame
+    bool has_vbr;          // Whether file has variable bitrate
+    uint8_t channel_mode;   // Channel configuration
+    uint32_t sampling_rate; // Sample rate in Hz
+};
+
 enum FormatDecoderError {
     FD_ERROR_NONE = 0,
     FD_ERROR_INVALID_PARAM,
@@ -17,6 +25,7 @@ enum FormatDecoderError {
 struct FormatDecoder {
     mp3dec_t mp3d;
     mp3dec_file_info_t info;
+    AudioFormatInfo format_info;
     size_t position;
     bool initialized;
     enum FormatDecoderError last_error;
@@ -35,12 +44,8 @@ FormatDecoder* format_decoder_create(void) {
 }
 
 bool format_decoder_open(FormatDecoder* decoder, const char* filepath) {
-    if (!decoder) {
-        return false;
-    }
-    
-    if (!filepath) {
-        decoder->last_error = FD_ERROR_INVALID_PARAM;
+    if (!decoder || !filepath) {
+        if (decoder) decoder->last_error = FD_ERROR_INVALID_PARAM;
         return false;
     }
     
@@ -53,23 +58,30 @@ bool format_decoder_open(FormatDecoder* decoder, const char* filepath) {
         decoder->last_error = FD_ERROR_FILE_NOT_FOUND;
         return false;
     }
+
+    // Read file into buffer for format detection
+    uint8_t header_buffer[8192];  // Reasonable size for detection
+    size_t bytes_read = fread(header_buffer, 1, sizeof(header_buffer), file);
     
-    // Load and decode MP3 file
+    // Detect format
+    decoder->last_error = detect_audio_format(header_buffer, bytes_read, 
+                                            &decoder->format_info);
+    if (decoder->last_error != FD_ERROR_NONE) {
+        fclose(file);
+        return false;
+    }
+    
+    // Rewind file and decode
+    fseek(file, 0, SEEK_SET);
     int load_result = mp3dec_load(&decoder->mp3d, filepath, &decoder->info, NULL, NULL);
+    
     if (load_result != 0) {
         decoder->last_error = load_result == MP3D_E_MEMORY ? 
             FD_ERROR_MEMORY : FD_ERROR_DECODE;
         fclose(file);
         return false;
     }
-    
-    if (decoder->info.channels == 0 || decoder->info.hz == 0) {
-        decoder->last_error = FD_ERROR_INVALID_FORMAT;
-        free(decoder->info.buffer);
-        fclose(file);
-        return false;
-    }
-    
+
     fclose(file);
     decoder->initialized = true;
     return true;
