@@ -107,12 +107,14 @@ static struct {
     bool enabled;               // Whether crossfading is enabled
     bool in_progress;           // Whether a crossfade is currently happening
     size_t current_position;    // Current position in the crossfade
+    size_t pause_position;      // Position to resume from when paused
 } crossfade_config = {
     .fade_length = 0,
     .fade_curve = 1.0f,
     .enabled = false,
     .in_progress = false,
-    .current_position = 0
+    .current_position = 0,
+    .pause_position = 0
 };
 
 // Crossfade buffer for transition
@@ -456,9 +458,15 @@ void AudioBuffer_Done(void) {
     double_buffer.samples_played += AUDIO_BUFFER_SIZE;
     buffer_stats.total_samples_processed += AUDIO_BUFFER_SIZE;
     
-    // Handle gapless transition if needed
     if (double_buffer.gapless_transition) {
         HandleGaplessTransition();
+        AudioPipeline_NotifyTransitionComplete();
+    }
+    
+    if (crossfade_config.in_progress && 
+        crossfade_config.current_position >= crossfade_config.fade_length) {
+        crossfade_config.in_progress = false;
+        AudioPipeline_NotifyCrossfadeComplete();
     }
 }
 
@@ -1006,6 +1014,11 @@ static bool CircularBuffer_Remove(CircularBuffer* cb, void* sample) {
 
 // Update buffer state and handle transitions
 void AudioBuffer_Update(void) {
+    // Don't process updates if paused
+    if (double_buffer.state == BUFFER_STATE_READY) {
+        return;
+    }
+
     // Check buffer levels and request more data if needed
     if (AudioBuffer_IsUnderThreshold()) {
         RequestMoreData();
@@ -1112,4 +1125,40 @@ bool AudioBuffer_Seek(size_t position_in_samples) {
     }
     
     return true;
+}
+
+bool AudioBuffer_ProcessComplete(void) {
+    // Update buffer state
+    AudioBuffer_Done();
+    
+    // Check if we need to handle transitions
+    if (double_buffer.gapless_transition || 
+        (crossfade_config.in_progress && 
+         crossfade_config.current_position >= crossfade_config.fade_length)) {
+        return true;  // Transitions are handled in AudioBuffer_Done()
+    }
+    
+    // Check for buffer underrun
+    if (AudioBuffer_IsUnderThreshold()) {
+        AudioBuffer_HandleUnderrun();
+        return false;
+    }
+    
+    return true;
+}
+
+void AudioBuffer_Pause(void) {
+    // Save current position for resume
+    size_t current_position = double_buffer.samples_played;
+    
+    // Stop processing but maintain buffer contents
+    if (double_buffer.state == BUFFER_STATE_PLAYING) {
+        double_buffer.state = BUFFER_STATE_READY;
+    }
+    
+    // Pause any active transitions
+    if (crossfade_config.in_progress) {
+        // Save crossfade state for resume
+        crossfade_config.pause_position = crossfade_config.current_position;
+    }
 }

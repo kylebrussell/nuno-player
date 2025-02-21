@@ -2,8 +2,15 @@
 #include "nuno/audio_buffer.h"
 #include "nuno/es9038q2m.h"
 #include "nuno/platform.h"
+#include "nuno/dma.h"
 #include <string.h>
 
+typedef enum {
+    PIPELINE_STATE_STOPPED,
+    PIPELINE_STATE_PLAYING,
+    PIPELINE_STATE_PAUSED,
+    PIPELINE_STATE_CROSSFADE_IN_PROGRESS
+} PipelineState;
 
 // Pipeline configuration
 typedef struct {
@@ -19,7 +26,12 @@ typedef struct {
     bool crossfade_enabled;
 } AudioPipeline;
 
-static AudioPipeline pipeline;
+static AudioPipeline pipeline = {
+    .state = PIPELINE_STATE_STOPPED,
+    .crossfade_enabled = false,
+    .transition_pending = false,
+    .transition_crossfade_ratio = 0.0f
+};
 
 // Initialize the audio pipeline
 bool AudioPipeline_Init(void) {
@@ -209,6 +221,37 @@ void AudioPipeline_UnregisterStateCallback(void) {
 // Helper function to handle state transitions
 static void updatePipelineState(PipelineState newState) {
     if (pipeline.state != newState) {
+        // Validate state transition
+        bool valid_transition = true;
+        
+        switch (pipeline.state) {
+            case PIPELINE_STATE_STOPPED:
+                // Can only go to PLAYING or PAUSED from STOPPED
+                valid_transition = (newState == PIPELINE_STATE_PLAYING || 
+                                  newState == PIPELINE_STATE_PAUSED);
+                break;
+                
+            case PIPELINE_STATE_PLAYING:
+                // Can go to any state from PLAYING
+                break;
+                
+            case PIPELINE_STATE_PAUSED:
+                // Cannot go directly to CROSSFADE from PAUSED
+                valid_transition = (newState != PIPELINE_STATE_CROSSFADE_IN_PROGRESS);
+                break;
+                
+            case PIPELINE_STATE_CROSSFADE_IN_PROGRESS:
+                // Can only go to PLAYING or STOPPED from CROSSFADE
+                valid_transition = (newState == PIPELINE_STATE_PLAYING || 
+                                  newState == PIPELINE_STATE_STOPPED);
+                break;
+        }
+        
+        if (!valid_transition) {
+            // Log invalid transition attempt
+            return;
+        }
+
         PipelineState oldState = pipeline.state;
         pipeline.state = newState;
         
@@ -251,5 +294,98 @@ void AudioPipeline_ProcessCrossfade(int16_t* buffer, size_t samples) {
             pipeline.transition_crossfade_ratio = 0.0f;
             break;
         }
+    }
+}
+
+void AudioPipeline_SynchronizeState(void) {
+    BufferState bufferState = AudioBuffer_GetState();
+    
+    // Validate current state combinations
+    bool state_mismatch = false;
+    
+    // Check for invalid state combinations
+    if (pipeline.state == PIPELINE_STATE_PLAYING && 
+        (bufferState == BUFFER_STATE_EMPTY || bufferState == BUFFER_STATE_PRELOADING)) {
+        state_mismatch = true;
+    }
+    
+    if (pipeline.state == PIPELINE_STATE_STOPPED && 
+        (bufferState == BUFFER_STATE_PLAYING || bufferState == BUFFER_STATE_READY)) {
+        state_mismatch = true;
+    }
+    
+    // Force realignment if states are invalid
+    if (state_mismatch) {
+        DMA_StopTransfer();
+        AudioBuffer_Flush(false);
+        updatePipelineState(PIPELINE_STATE_STOPPED);
+        return;
+    }
+
+    switch (bufferState) {
+        case BUFFER_STATE_EMPTY:
+            if (pipeline.state != PIPELINE_STATE_STOPPED) {
+                updatePipelineState(PIPELINE_STATE_STOPPED);
+            }
+            break;
+            
+        case BUFFER_STATE_UNDERRUN:
+            if (pipeline.state == PIPELINE_STATE_PLAYING) {
+                AudioPipeline_HandleUnderrun();
+            } else {
+                // If we're not playing, treat underrun as a stop condition
+                updatePipelineState(PIPELINE_STATE_STOPPED);
+            }
+            break;
+            
+        case BUFFER_STATE_PLAYING:
+            if (pipeline.state == PIPELINE_STATE_PAUSED) {
+                DMA_PauseTransfer();
+                AudioBuffer_Pause();  // Add this function to audio_buffer.h
+            } else if (pipeline.state == PIPELINE_STATE_STOPPED) {
+                updatePipelineState(PIPELINE_STATE_PLAYING);
+            }
+            break;
+            
+        case BUFFER_STATE_PRELOADING:
+            // Ensure we're not in an active state while preloading
+            if (pipeline.state == PIPELINE_STATE_PLAYING || 
+                pipeline.state == PIPELINE_STATE_CROSSFADE_IN_PROGRESS) {
+                updatePipelineState(PIPELINE_STATE_PAUSED);
+            }
+            break;
+            
+        case BUFFER_STATE_READY:
+            // If we were paused and buffer is ready, we can resume
+            if (pipeline.state == PIPELINE_STATE_PAUSED && !pipeline.transition_pending) {
+                updatePipelineState(PIPELINE_STATE_PLAYING);
+            }
+            break;
+    }
+    
+    if (pipeline.crossfade_enabled && crossfade_config.in_progress) {
+        if (pipeline.state != PIPELINE_STATE_CROSSFADE_IN_PROGRESS) {
+            updatePipelineState(PIPELINE_STATE_CROSSFADE_IN_PROGRESS);
+        }
+    } else if (pipeline.state == PIPELINE_STATE_CROSSFADE_IN_PROGRESS) {
+        // Crossfade ended but state wasn't updated
+        updatePipelineState(PIPELINE_STATE_PLAYING);
+    }
+}
+
+void AudioPipeline_NotifyTransitionComplete(void) {
+    pipeline.transition_pending = false;
+    
+    if (pipeline.state == PIPELINE_STATE_CROSSFADE_IN_PROGRESS) {
+        updatePipelineState(PIPELINE_STATE_PLAYING);
+    }
+}
+
+void AudioPipeline_NotifyCrossfadeComplete(void) {
+    pipeline.transition_pending = false;
+    pipeline.transition_crossfade_ratio = 0.0f;
+    
+    if (pipeline.state == PIPELINE_STATE_CROSSFADE_IN_PROGRESS) {
+        updatePipelineState(PIPELINE_STATE_PLAYING);
     }
 }

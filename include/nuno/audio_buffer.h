@@ -18,6 +18,14 @@ typedef struct {
     bool is_full;
 } CircularBuffer;
 
+typedef enum {
+    BUFFER_STATE_EMPTY,
+    BUFFER_STATE_UNDERRUN,
+    BUFFER_STATE_PLAYING,
+    BUFFER_STATE_PRELOADING,
+    BUFFER_STATE_READY
+} BufferState;
+
 // Initialize the audio buffer
 void AudioBuffer_Init(void);
 
@@ -225,5 +233,17 @@ void AudioBuffer_Update(void);
  * @return true if seek was successful, false otherwise
  */
 bool AudioBuffer_Seek(size_t position_in_samples);
+
+// Add new function declarations
+BufferState AudioBuffer_GetState(void);
+bool AudioBuffer_ProcessComplete(void);
+
+/**
+ * @brief Pause buffer processing
+ * 
+ * Prepares the buffer system for a pause state, ensuring
+ * all processing is properly suspended.
+ */
+void AudioBuffer_Pause(void);
 
 #endif // AUDIO_BUFFER_H
