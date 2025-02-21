@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#define SAMPLE_RATE 44100  // or whatever your sample rate is
+
 // Pipeline state enumeration
 typedef enum {
     PIPELINE_STATE_STOPPED,

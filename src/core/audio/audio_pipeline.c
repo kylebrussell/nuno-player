@@ -33,6 +33,9 @@ static AudioPipeline pipeline = {
     .transition_crossfade_ratio = 0.0f
 };
 
+#define FADE_OUT_DURATION_MS 50  // 50ms fade out
+#define FADE_OUT_SAMPLES (FADE_OUT_DURATION_MS * SAMPLE_RATE / 1000)
+
 // Initialize the audio pipeline
 bool AudioPipeline_Init(void) {
     // Initialize pipeline state
@@ -424,4 +427,19 @@ bool AudioPipeline_Seek(size_t sample_position) {
     }
     
     return true;
+}
+
+void AudioPipeline_Stop(void) {
+    if (pipeline.state != PIPELINE_STATE_STOPPED) {
+        // Stop DMA transfers
+        DMA_StopTransfer();
+        
+        // Power down DAC
+        ES9038Q2M_PowerDown();
+        
+        // Reset buffer system
+        AudioBuffer_Init();
+        
+        updatePipelineState(PIPELINE_STATE_STOPPED);
+    }
 }
