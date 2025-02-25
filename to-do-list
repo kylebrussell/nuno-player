@@ -25,21 +25,7 @@ src/core/audio/format_handlers.c:
 - Add residual coding parsing support
 
 include/nuno/format_handlers.h:
-- Define FLAC-specific structures:
-  - FLAC_StreamInfo structure
-  - FLAC_FrameHeader structure
-  - FLAC_Subframe structure
-  - FLAC_SeekTable structure
-- Add FLAC-related constants:
-  - Block type definitions
-  - Frame sync code
-  - Sample size constants
-  - Channel assignment values
-- Define interfaces for FLAC operations:
-  - Metadata block parsing functions
-  - Frame parsing functions
-  - Subframe parsing functions
-  - CRC calculation utilities
+
 
 include/nuno/format_decoder.h:
 - Define buffer requirements per format
@@ -130,12 +116,12 @@ Build System Integration:
     - Update CMake to include minimp3 headers
     - Add license file and attribution
   - Add libFLAC dependency:
-  - Download libFLAC source
-  - Add to external/libflac/
-  - Configure build options
-  - Add include paths
-  - Update CMake configuration
-  - Add license and attribution  
+    - Download libFLAC source
+    - Add to external/libflac/
+    - Configure build options
+    - Add include paths
+    - Update CMake configuration
+    - Add license and attribution  
 
 src/core/database/db_init.c:
 - Implement SQLite database initialization
