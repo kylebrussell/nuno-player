@@ -7,6 +7,12 @@
 #define ID3V2_HEADER_SIZE 10
 #define ID3V1_TAG_SIZE 128
 
+// FLAC constants
+#define FLAC_SYNC_CODE 0xFFF8
+#define FLAC_METADATA_BLOCK_STREAMINFO 0
+#define FLAC_METADATA_BLOCK_SEEKTABLE 3
+#define FLAC_LAST_METADATA_BLOCK_FLAG 0x80
+
 // MP3 frame header structure
 typedef struct {
     uint16_t sync_word;      // 12 bits
@@ -174,4 +180,189 @@ enum FormatDecoderError detect_audio_format(const uint8_t* data, size_t size,
     }
 
     return frame_found ? FD_ERROR_NONE : FD_ERROR_INVALID_FORMAT;
+}
+
+// FLAC metadata parsing functions
+static bool parse_flac_streaminfo(const uint8_t* data, size_t length, AudioFormatInfo* info) {
+    if (length < 34) {
+        return false;  // STREAMINFO block must be at least 34 bytes
+    }
+    
+    // Extract sample rate (20 bits)
+    uint32_t sample_rate = (data[10] << 12) | (data[11] << 4) | (data[12] >> 4);
+    
+    // Extract number of channels (3 bits)
+    uint8_t channels = ((data[12] >> 1) & 0x07) + 1;
+    
+    // Extract bits per sample (5 bits)
+    uint8_t bits_per_sample = ((data[12] & 0x01) << 4) | (data[13] >> 4);
+    bits_per_sample += 1;
+    
+    // Extract total samples (36 bits)
+    uint64_t total_samples = 
+        ((uint64_t)data[13] & 0x0F) << 32 |
+        (uint64_t)data[14] << 24 |
+        (uint64_t)data[15] << 16 |
+        (uint64_t)data[16] << 8 |
+        (uint64_t)data[17];
+    
+    // Populate the AudioFormatInfo structure
+    info->sample_rate = sample_rate;
+    info->channels = channels;
+    info->bits_per_sample = bits_per_sample;
+    info->total_samples = total_samples;
+    info->format_type = AUDIO_FORMAT_FLAC;
+    
+    return true;
+}
+
+static bool parse_flac_seektable(const uint8_t* data, size_t length, AudioFormatInfo* info) {
+    if (length < 18) {
+        return false;  // Each seek point is at least 18 bytes
+    }
+    
+    // Number of seek points
+    size_t num_seek_points = length / 18;
+    
+    // Allocate memory for seek points if needed
+    // This is just a basic implementation - you might want to store this differently
+    if (info->seek_table == NULL && num_seek_points > 0) {
+        info->seek_table = malloc(sizeof(SeekPoint) * num_seek_points);
+        info->seek_points_count = num_seek_points;
+    }
+    
+    // Parse each seek point
+    for (size_t i = 0; i < num_seek_points; i++) {
+        const uint8_t* point_data = data + (i * 18);
+        
+        // Sample number (64 bits)
+        uint64_t sample_number = 
+            ((uint64_t)point_data[0] << 56) |
+            ((uint64_t)point_data[1] << 48) |
+            ((uint64_t)point_data[2] << 40) |
+            ((uint64_t)point_data[3] << 32) |
+            ((uint64_t)point_data[4] << 24) |
+            ((uint64_t)point_data[5] << 16) |
+            ((uint64_t)point_data[6] << 8) |
+            ((uint64_t)point_data[7]);
+        
+        // Stream offset (64 bits)
+        uint64_t stream_offset = 
+            ((uint64_t)point_data[8] << 56) |
+            ((uint64_t)point_data[9] << 48) |
+            ((uint64_t)point_data[10] << 40) |
+            ((uint64_t)point_data[11] << 32) |
+            ((uint64_t)point_data[12] << 24) |
+            ((uint64_t)point_data[13] << 16) |
+            ((uint64_t)point_data[14] << 8) |
+            ((uint64_t)point_data[15]);
+        
+        // Frame samples (16 bits)
+        uint16_t frame_samples = 
+            (point_data[16] << 8) |
+            point_data[17];
+        
+        // Skip placeholder points (all bits set to 1)
+        if (sample_number == 0xFFFFFFFFFFFFFFFF) {
+            continue;
+        }
+        
+        // Store the seek point
+        if (info->seek_table != NULL) {
+            info->seek_table[i].sample_number = sample_number;
+            info->seek_table[i].stream_offset = stream_offset;
+            info->seek_table[i].frame_samples = frame_samples;
+        }
+    }
+    
+    return true;
+}
+
+bool detect_flac_format(const uint8_t* data, size_t length, AudioFormatInfo* info) {
+    // Check for minimum FLAC header size (4 bytes for "fLaC" marker + 4 bytes for STREAMINFO metadata block header)
+    if (length < 8) {
+        return false;
+    }
+    
+    // Check for FLAC marker "fLaC"
+    if (data[0] != 'f' || data[1] != 'L' || data[2] != 'a' || data[3] != 'C') {
+        return false;
+    }
+    
+    // Initialize the info structure
+    memset(info, 0, sizeof(AudioFormatInfo));
+    
+    // Parse metadata blocks
+    size_t offset = 4;  // Skip the "fLaC" marker
+    bool last_block = false;
+    bool found_streaminfo = false;
+    
+    while (!last_block && offset + 4 <= length) {
+        // Read block header
+        uint8_t block_type = data[offset] & 0x7F;
+        last_block = (data[offset] & FLAC_LAST_METADATA_BLOCK_FLAG) != 0;
+        
+        // Get block length (24 bits)
+        uint32_t block_length = 
+            (data[offset + 1] << 16) |
+            (data[offset + 2] << 8) |
+            data[offset + 3];
+        
+        // Move past the block header
+        offset += 4;
+        
+        // Check if we have enough data for this block
+        if (offset + block_length > length) {
+            break;
+        }
+        
+        // Process the block based on its type
+        switch (block_type) {
+            case FLAC_METADATA_BLOCK_STREAMINFO:
+                if (parse_flac_streaminfo(data + offset, block_length, info)) {
+                    found_streaminfo = true;
+                }
+                break;
+                
+            case FLAC_METADATA_BLOCK_SEEKTABLE:
+                parse_flac_seektable(data + offset, block_length, info);
+                break;
+                
+            default:
+                // Skip other block types
+                break;
+        }
+        
+        // Move to the next block
+        offset += block_length;
+    }
+    
+    // FLAC format is valid only if we found a STREAMINFO block
+    return found_streaminfo;
+}
+
+bool detect_flac_sync(const uint8_t* data, size_t length) {
+    // FLAC sync code is 14 bits (0x3FFE) followed by 2 reserved bits
+    // We need at least 2 bytes to check for the sync code
+    if (length < 2) {
+        return false;
+    }
+    
+    // Check for FLAC sync code (0xFFF8) in the first 14 bits
+    uint16_t sync_code = ((data[0] << 8) | data[1]) & 0xFFFE;
+    return (sync_code == FLAC_SYNC_CODE);
+}
+
+// Update the detect_format function to include FLAC detection
+AudioFormatType detect_format(const uint8_t* data, size_t length, AudioFormatInfo* info) {
+    // ... existing code ...
+    
+    // Try to detect FLAC format
+    if (detect_flac_format(data, length, info)) {
+        return AUDIO_FORMAT_FLAC;
+    }
+    
+    // ... existing code ...
+    
+    return AUDIO_FORMAT_UNKNOWN;
 }

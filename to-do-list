@@ -6,10 +6,7 @@ src/core/audio/audio_pipeline.c:
 - Handle real-time sample rate or bit-depth reconfiguration: if the user changes to a new track with different format mid-playback, drain or re-init the buffer before continuing.
 
 src/core/audio/format_handlers.c:
-- Add FLAC sync block detection (0xFFF8)
 - Implement FLAC metadata block parsing:
-  - STREAMINFO block parsing (required)
-  - SEEKTABLE block parsing (for seeking)
   - VORBIS_COMMENT block parsing (for tags)
   - PICTURE block parsing (optional)
 - Add FLAC frame header parsing:
