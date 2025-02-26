@@ -354,4 +354,12 @@ uint32_t decode_flac_frame(const uint8_t* frame_data, size_t frame_length,
 size_t find_flac_frame(const uint8_t* data, size_t size, size_t offset, 
                       FLAC_FrameHeader* frame_info);
 
+/**
+ * @brief Validate a complete FLAC frame including CRC-16
+ * @param data Pointer to the frame data
+ * @param length Total length of the frame including CRC-16
+ * @return true if the frame is valid, false otherwise
+ */
+bool validate_flac_frame(const uint8_t* data, size_t length);
+
 #endif /* FORMAT_HANDLERS_H */

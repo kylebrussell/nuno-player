@@ -17,6 +17,10 @@
 #define FLAC_FRAME_SYNC_CODE 0x3FFE
 #define FLAC_MAX_FRAME_HEADER_SIZE 16
 
+// FLAC CRC constants
+#define FLAC_CRC8_POLYNOMIAL 0x07
+#define FLAC_CRC16_POLYNOMIAL 0x8005
+
 // MP3 frame header structure
 typedef struct {
     uint16_t sync_word;      // 12 bits
@@ -373,6 +377,66 @@ bool detect_flac_sync(const uint8_t* data, size_t length) {
     return (sync_code == FLAC_SYNC_CODE);
 }
 
+// Rename calculate_crc8 to flac_crc8
+uint8_t flac_crc8(const uint8_t* data, size_t length) {
+    uint8_t crc = 0;
+    
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 0x80) {
+                crc = (crc << 1) ^ FLAC_CRC8_POLYNOMIAL;
+            } else {
+                crc <<= 1;
+            }
+        }
+    }
+    
+    return crc;
+}
+
+// Rename calculate_crc16 to flac_crc16
+uint16_t flac_crc16(const uint8_t* data, size_t length) {
+    uint16_t crc = 0;
+    
+    for (size_t i = 0; i < length; i++) {
+        crc ^= ((uint16_t)data[i] << 8);
+        for (int j = 0; j < 8; j++) {
+            if (crc & 0x8000) {
+                crc = (crc << 1) ^ FLAC_CRC16_POLYNOMIAL;
+            } else {
+                crc <<= 1;
+            }
+        }
+    }
+    
+    return crc;
+}
+
+/**
+ * @brief Validate FLAC frame header CRC
+ * @param data Pointer to the frame header
+ * @param header_size Size of the header excluding the CRC byte
+ * @param expected_crc Expected CRC value
+ * @return true if CRC is valid, false otherwise
+ */
+static bool validate_flac_header_crc(const uint8_t* data, size_t header_size, uint8_t expected_crc) {
+    uint8_t calculated_crc = flac_crc8(data, header_size);
+    return calculated_crc == expected_crc;
+}
+
+/**
+ * @brief Validate FLAC frame CRC
+ * @param data Pointer to the entire frame including header
+ * @param frame_size Size of the frame excluding the CRC-16 (last 2 bytes)
+ * @param expected_crc Expected CRC-16 value
+ * @return true if CRC is valid, false otherwise
+ */
+static bool validate_flac_frame_crc(const uint8_t* data, size_t frame_size, uint16_t expected_crc) {
+    uint16_t calculated_crc = flac_crc16(data, frame_size);
+    return calculated_crc == expected_crc;
+}
+
 /**
  * @brief Parse a FLAC frame header
  * @param data Pointer to the start of the frame header
@@ -517,6 +581,11 @@ size_t parse_flac_frame_header(const uint8_t* data, size_t length,
     if (offset >= length) return 0;
     header->crc8 = data[offset++];
     
+    // Validate CRC-8 of the header
+    if (!validate_flac_header_crc(data, offset - 1, header->crc8)) {
+        return 0;  // Invalid CRC
+    }
+    
     return offset;  // Return the total header size
 }
 
@@ -572,12 +641,68 @@ size_t find_flac_frame(const uint8_t* data, size_t size, size_t offset,
     while (offset + FLAC_MAX_FRAME_HEADER_SIZE <= size) {
         size_t header_size = parse_flac_frame_header(data + offset, size - offset, frame_info, NULL);
         if (header_size > 0) {
-            return offset + header_size;
+            // Found a valid header, now check if we have a complete frame
+            // We need to determine the frame size based on block size and other parameters
+            size_t estimated_frame_size = estimate_flac_frame_size(frame_info);
+            
+            // Check if we have enough data for the complete frame
+            if (offset + header_size + estimated_frame_size + 2 <= size) {  // +2 for CRC-16
+                // Validate the entire frame with CRC-16
+                if (validate_flac_frame(data + offset, header_size + estimated_frame_size + 2)) {
+                    return offset + header_size;  // Return position after header
+                }
+            }
         }
         offset++;
     }
     
     return 0;  // No valid frame found
+}
+
+/**
+ * @brief Estimate FLAC frame size based on header information
+ * @param frame_info Frame header information
+ * @return Estimated frame size in bytes (excluding header and CRC-16)
+ */
+static size_t estimate_flac_frame_size(const FLAC_FrameHeader* frame_info) {
+    if (!frame_info || frame_info->block_size == 0) {
+        return 0;
+    }
+    
+    // Get number of channels
+    uint8_t channels = get_flac_channels(frame_info->channel_assignment);
+    if (channels == 0) {
+        return 0;
+    }
+    
+    // Estimate based on block size, channels, and bits per sample
+    // This is a rough estimate - actual size depends on compression efficiency
+    size_t bits_per_sample = frame_info->sample_size > 0 ? frame_info->sample_size : 16;
+    
+    // Assume average compression ratio of 0.7 (30% reduction)
+    double compression_ratio = 0.7;
+    
+    // Calculate raw data size and apply compression ratio
+    size_t raw_size = (frame_info->block_size * channels * bits_per_sample) / 8;
+    return (size_t)(raw_size * compression_ratio);
+}
+
+/**
+ * @brief Validate a complete FLAC frame including CRC-16
+ * @param data Pointer to the frame data
+ * @param length Total length of the frame including CRC-16
+ * @return true if the frame is valid, false otherwise
+ */
+bool validate_flac_frame(const uint8_t* data, size_t length) {
+    if (length < 6) {  // Minimum frame size (header + CRC-16)
+        return false;
+    }
+    
+    // The last 2 bytes are the CRC-16
+    uint16_t expected_crc = (data[length - 2] << 8) | data[length - 1];
+    
+    // Calculate CRC-16 on all data except the last 2 bytes
+    return validate_flac_frame_crc(data, length - 2, expected_crc);
 }
 
 // Update the detect_format function to include FLAC detection
