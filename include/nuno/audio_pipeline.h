@@ -129,4 +129,16 @@ void AudioPipeline_ProcessCrossfade(int16_t* buffer, size_t samples);
  */
 bool AudioPipeline_Seek(size_t sample_position);
 
+/**
+ * @brief Reconfigure audio format during playback
+ * 
+ * This function handles real-time changes to sample rate or bit depth,
+ * ensuring proper buffer draining and DAC reconfiguration.
+ * 
+ * @param new_sample_rate New sample rate in Hz
+ * @param new_bit_depth New bit depth (8, 16, 24, or 32)
+ * @return true if reconfiguration successful, false otherwise
+ */
+bool AudioPipeline_ReconfigureFormat(uint32_t new_sample_rate, uint8_t new_bit_depth);
+
 #endif /* AUDIO_PIPELINE_H */

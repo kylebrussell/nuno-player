@@ -1,8 +1,8 @@
-#include "nuno/audio_pipeline.h"
-#include "nuno/audio_buffer.h"
-#include "nuno/es9038q2m.h"
-#include "nuno/platform.h"
-#include "nuno/dma.h"
+#include "../../../include/nuno/audio_pipeline.h"
+#include "../../../include/nuno/audio_buffer.h"
+#include "../../../include/nuno/es9038q2m.h"
+#include "../../../include/nuno/platform.h"
+#include "../../../include/nuno/dma.h"
 #include <string.h>
 
 typedef enum {
@@ -147,24 +147,76 @@ bool AudioPipeline_SetVolume(uint8_t volume) {
     return ES9038Q2M_SetVolume(dac_volume, dac_volume);
 }
 
-// Configure pipeline parameters
+// Add this new function to handle format changes
+bool AudioPipeline_ReconfigureFormat(uint32_t new_sample_rate, uint8_t new_bit_depth) {
+    // Check if format is actually changing
+    if (pipeline.sample_rate == new_sample_rate && pipeline.bit_depth == new_bit_depth) {
+        return true; // No change needed
+    }
+    
+    // Save current state
+    PipelineState previous_state = pipeline.state;
+    
+    // Pause playback during reconfiguration
+    if (previous_state == PIPELINE_STATE_PLAYING) {
+        AudioPipeline_Pause();
+    }
+    
+    // Stop DMA transfers
+    DMA_StopTransfer();
+    
+    // Flush audio buffers to prepare for new format
+    AudioBuffer_Flush(false);
+    
+    // Update pipeline configuration
+    pipeline.sample_rate = new_sample_rate;
+    pipeline.bit_depth = new_bit_depth;
+    
+    // Update DAC configuration
+    pipeline.dac_config.sample_rate = new_sample_rate;
+    pipeline.dac_config.bit_depth = new_bit_depth;
+    
+    // Reconfigure DAC clock for new format
+    if (!ES9038Q2M_ConfigureClock(new_sample_rate, new_bit_depth)) {
+        return false;
+    }
+    
+    // Configure audio buffer for new format
+    AudioBuffer_ConfigureSampleRate(new_sample_rate, new_sample_rate);
+    AudioBuffer_ConfigureSampleFormat(new_bit_depth, false, true);
+    
+    // If we were previously playing, restart playback
+    if (previous_state == PIPELINE_STATE_PLAYING) {
+        if (!AudioBuffer_StartPlayback()) {
+            return false;
+        }
+        updatePipelineState(PIPELINE_STATE_PLAYING);
+    }
+    
+    return true;
+}
+
+// Modify AudioPipeline_Configure to use the new function
 bool AudioPipeline_Configure(const AudioPipelineConfig* config) {
     if (!config) return false;
-
-    pipeline.sample_rate = config->sample_rate;
-    pipeline.bit_depth = config->bit_depth;
+    
+    // Handle sample rate and bit depth changes
+    if (pipeline.sample_rate != config->sample_rate || 
+        pipeline.bit_depth != config->bit_depth) {
+        if (!AudioPipeline_ReconfigureFormat(config->sample_rate, config->bit_depth)) {
+            return false;
+        }
+    }
+    
+    // Configure other parameters
     pipeline.gapless_enabled = config->gapless_enabled;
     pipeline.crossfade_enabled = config->crossfade_enabled;
     
     // Calculate fade duration in samples (default 50ms crossfade)
     pipeline.transition_fade_samples = (pipeline.sample_rate * 50) / 1000;
     pipeline.transition_crossfade_ratio = 0.0f;
-
-    // Update DAC configuration
-    pipeline.dac_config.sample_rate = config->sample_rate;
-    pipeline.dac_config.bit_depth = config->bit_depth;
     
-    return ES9038Q2M_ConfigureClock(config->sample_rate, config->bit_depth);
+    return true;
 }
 
 // Get current pipeline state
