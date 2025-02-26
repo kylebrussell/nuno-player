@@ -103,13 +103,7 @@ Build System Integration:
     - Add to external/minimp3/
     - Update CMake to include minimp3 headers
     - Add license file and attribution
-  - Add libFLAC dependency:
-    - Download libFLAC source
-    - Add to external/libflac/
-    - Configure build options
-    - Add include paths
-    - Update CMake configuration
-    - Add license and attribution  
+
 
 src/core/database/db_init.c:
 - Implement SQLite database initialization

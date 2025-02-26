@@ -31,3 +31,11 @@ Currently in the early stages of development, focusing on core embedded systems 
 ### Power Management
 - Intelligent battery management
 - USB-C PD quick charging support
+
+## Dependencies
+
+### Audio Codecs
+- **libFLAC** - Free Lossless Audio Codec for FLAC file support
+  - Version: 1.4.3
+  - License: BSD-like
+  - Source: https://github.com/xiph/flac

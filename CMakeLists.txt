@@ -34,6 +34,9 @@ if(NOT BUILD_SIM)
   find_package(FreeRTOS REQUIRED)
 endif()
 
+# Find libFLAC
+find_package(LibFLAC REQUIRED)
+
 # Libraries
 add_library(drivers
     src/drivers/es9038q2m/es9038q2m.c
@@ -50,6 +53,9 @@ add_library(core
 target_include_directories(core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(core PUBLIC
+    libflac
 )
 
 add_library(platform
