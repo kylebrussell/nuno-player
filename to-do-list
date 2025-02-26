@@ -2,7 +2,6 @@ src/core/audio/audio_buffer.c:
 
 
 src/core/audio/audio_pipeline.c:
-- Implement end-of-playlist handling
 
 
 src/core/audio/format_handlers.c:

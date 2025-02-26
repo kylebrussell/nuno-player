@@ -141,4 +141,32 @@ bool AudioPipeline_Seek(size_t sample_position);
  */
 bool AudioPipeline_ReconfigureFormat(uint32_t new_sample_rate, uint8_t new_bit_depth);
 
+// Add this after the PipelineStateCallback definition
+// Callback function type for end of playlist notification
+typedef void (*EndOfPlaylistCallback)(void);
+
+/**
+ * @brief Register a callback for end of playlist notification
+ * @param callback Function to be called when the end of playlist is reached
+ */
+void AudioPipeline_RegisterEndOfPlaylistCallback(EndOfPlaylistCallback callback);
+
+/**
+ * @brief Unregister the end of playlist callback
+ */
+void AudioPipeline_UnregisterEndOfPlaylistCallback(void);
+
+/**
+ * @brief Reset end of playlist flag
+ * 
+ * Call this when loading a new playlist to clear the end-of-playlist state
+ */
+void AudioPipeline_ResetEndOfPlaylistFlag(void);
+
+/**
+ * @brief Check if end of playlist has been reached
+ * @return true if the end of playlist has been reached, false otherwise
+ */
+bool AudioPipeline_IsEndOfPlaylistReached(void);
+
 #endif /* AUDIO_PIPELINE_H */

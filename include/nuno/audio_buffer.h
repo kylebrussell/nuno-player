@@ -246,4 +246,21 @@ bool AudioBuffer_ProcessComplete(void);
  */
 void AudioBuffer_Pause(void);
 
+/**
+ * @brief Check if there's another track available in the playlist
+ * @return true if another track is available, false if at the end of playlist
+ */
+bool AudioBuffer_HasNextTrack(void);
+
+/**
+ * @brief Set the availability of the next track
+ * 
+ * This function should be called by the playlist manager when the
+ * track list changes or when transitioning between tracks.
+ * 
+ * @param available Whether another track is available
+ * @param remaining_tracks Number of tracks remaining in the playlist
+ */
+void AudioBuffer_SetNextTrackAvailability(bool available, size_t remaining_tracks);
+
 #endif // AUDIO_BUFFER_H

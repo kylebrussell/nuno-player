@@ -62,6 +62,8 @@ static struct {
     size_t buffer_underruns;
     uint32_t last_transition_timestamp;
     float average_buffer_utilization;
+    bool has_next_track;
+    size_t remaining_tracks;
 } buffer_stats = {0};
 
 // Maximum number of read retries before giving up
@@ -670,12 +672,16 @@ void AudioBuffer_GetBufferStats(size_t* total_samples,
                               size_t* transitions,
                               size_t* underruns,
                               uint32_t* last_transition_time,
-                              float* buffer_utilization) {
+                              float* buffer_utilization,
+                              bool* has_next_track,
+                              size_t* remaining_tracks) {
     if (total_samples) *total_samples = buffer_stats.total_samples_processed;
     if (transitions) *transitions = buffer_stats.successful_transitions;
     if (underruns) *underruns = buffer_stats.buffer_underruns;
     if (last_transition_time) *last_transition_time = buffer_stats.last_transition_timestamp;
     if (buffer_utilization) *buffer_utilization = buffer_stats.average_buffer_utilization;
+    if (has_next_track) *has_next_track = buffer_stats.has_next_track;
+    if (remaining_tracks) *remaining_tracks = buffer_stats.remaining_tracks;
 }
 
 // Reset buffer statistics
@@ -1161,4 +1167,17 @@ void AudioBuffer_Pause(void) {
         // Save crossfade state for resume
         crossfade_config.pause_position = crossfade_config.current_position;
     }
+}
+
+// Add this function to check if there's another track available
+bool AudioBuffer_HasNextTrack(void) {
+    // This implementation depends on how your playlist management works
+    // For now, we'll use the has_next_track flag from buffer_stats
+    return buffer_stats.has_next_track;
+}
+
+// Add this function to update the next track availability
+void AudioBuffer_SetNextTrackAvailability(bool available, size_t remaining_tracks) {
+    buffer_stats.has_next_track = available;
+    buffer_stats.remaining_tracks = remaining_tracks;
 }

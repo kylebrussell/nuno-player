@@ -24,13 +24,17 @@ typedef struct {
     uint32_t transition_fade_samples;
     float transition_crossfade_ratio;
     bool crossfade_enabled;
+    bool end_of_playlist_reached;  // New flag to track end of playlist
+    EndOfPlaylistCallback end_of_playlist_callback;  // New callback for end of playlist
 } AudioPipeline;
 
 static AudioPipeline pipeline = {
     .state = PIPELINE_STATE_STOPPED,
     .crossfade_enabled = false,
     .transition_pending = false,
-    .transition_crossfade_ratio = 0.0f
+    .transition_crossfade_ratio = 0.0f,
+    .end_of_playlist_reached = false,
+    .end_of_playlist_callback = NULL
 };
 
 #define FADE_OUT_DURATION_MS 50  // 50ms fade out
@@ -243,6 +247,24 @@ void AudioPipeline_HandleEndOfFile(void) {
 
     pipeline.transition_pending = true;
 
+    // Check if there's another track available
+    bool has_next_track = AudioBuffer_HasNextTrack();
+    
+    if (!has_next_track) {
+        // We've reached the end of the playlist
+        pipeline.end_of_playlist_reached = true;
+        
+        // Notify via callback if registered
+        if (pipeline.end_of_playlist_callback != NULL) {
+            pipeline.end_of_playlist_callback();
+        }
+        
+        // Stop playback
+        AudioPipeline_Stop();
+        return;
+    }
+
+    // Continue with normal track transition
     if (pipeline.gapless_enabled) {
         if (pipeline.crossfade_enabled) {
             // Initialize crossfade
@@ -271,6 +293,26 @@ void AudioPipeline_RegisterStateCallback(PipelineStateCallback callback) {
 
 void AudioPipeline_UnregisterStateCallback(void) {
     pipeline.state_callback = NULL;
+}
+
+// Register callback for end of playlist notification
+void AudioPipeline_RegisterEndOfPlaylistCallback(EndOfPlaylistCallback callback) {
+    pipeline.end_of_playlist_callback = callback;
+}
+
+// Unregister end of playlist callback
+void AudioPipeline_UnregisterEndOfPlaylistCallback(void) {
+    pipeline.end_of_playlist_callback = NULL;
+}
+
+// Reset end of playlist flag (call when loading a new playlist)
+void AudioPipeline_ResetEndOfPlaylistFlag(void) {
+    pipeline.end_of_playlist_reached = false;
+}
+
+// Check if end of playlist has been reached
+bool AudioPipeline_IsEndOfPlaylistReached(void) {
+    return pipeline.end_of_playlist_reached;
 }
 
 // Helper function to handle state transitions
@@ -479,19 +521,4 @@ bool AudioPipeline_Seek(size_t sample_position) {
     }
     
     return true;
-}
-
-void AudioPipeline_Stop(void) {
-    if (pipeline.state != PIPELINE_STATE_STOPPED) {
-        // Stop DMA transfers
-        DMA_StopTransfer();
-        
-        // Power down DAC
-        ES9038Q2M_PowerDown();
-        
-        // Reset buffer system
-        AudioBuffer_Init();
-        
-        updatePipelineState(PIPELINE_STATE_STOPPED);
-    }
 }
