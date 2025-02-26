@@ -343,4 +343,15 @@ uint32_t decode_flac_frame(const uint8_t* frame_data, size_t frame_length,
                           AudioBuffer* buffer,
                           const FLAC_StreamInfo* stream_info);
 
+/**
+ * @brief Find and validate a FLAC frame
+ * @param data Raw audio file data
+ * @param size Size of the data buffer
+ * @param offset Starting offset to search from
+ * @param frame_info Output parameter for frame information
+ * @return Offset of the next frame, or 0 if no valid frame found
+ */
+size_t find_flac_frame(const uint8_t* data, size_t size, size_t offset, 
+                      FLAC_FrameHeader* frame_info);
+
 #endif /* FORMAT_HANDLERS_H */

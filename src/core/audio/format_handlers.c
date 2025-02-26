@@ -13,6 +13,10 @@
 #define FLAC_METADATA_BLOCK_SEEKTABLE 3
 #define FLAC_LAST_METADATA_BLOCK_FLAG 0x80
 
+// FLAC frame header constants
+#define FLAC_FRAME_SYNC_CODE 0x3FFE
+#define FLAC_MAX_FRAME_HEADER_SIZE 16
+
 // MP3 frame header structure
 typedef struct {
     uint16_t sync_word;      // 12 bits
@@ -45,6 +49,22 @@ typedef struct {
     uint8_t toc[100];       // Table of contents
     uint32_t quality;        // VBR quality
 } VBRHeader;
+
+// FLAC frame header structure
+typedef struct {
+    uint16_t sync_code;          // 14 bits
+    uint8_t reserved;            // 1 bit
+    uint8_t blocking_strategy;   // 1 bit
+    uint8_t block_size_code;     // 4 bits
+    uint8_t sample_rate_code;    // 4 bits
+    uint8_t channel_assignment;  // 4 bits
+    uint8_t sample_size_code;    // 3 bits
+    uint8_t reserved2;           // 1 bit
+    uint64_t frame_number;       // variable
+    uint32_t block_size;         // if block_size_code == 6 or 7
+    uint32_t sample_rate;        // if sample_rate_code == 12, 13, or 14
+    uint8_t crc8;                // 8 bits
+} FLACFrameHeader;
 
 static bool parse_mp3_frame_header(const uint8_t* data, MP3FrameHeader* header) {
     if (!data || !header) return false;
@@ -351,6 +371,213 @@ bool detect_flac_sync(const uint8_t* data, size_t length) {
     // Check for FLAC sync code (0xFFF8) in the first 14 bits
     uint16_t sync_code = ((data[0] << 8) | data[1]) & 0xFFFE;
     return (sync_code == FLAC_SYNC_CODE);
+}
+
+/**
+ * @brief Parse a FLAC frame header
+ * @param data Pointer to the start of the frame header
+ * @param length Available data length
+ * @param header Output parameter for the parsed header
+ * @param stream_info Pointer to stream info for reference values
+ * @return Size of the header in bytes, or 0 if invalid
+ */
+size_t parse_flac_frame_header(const uint8_t* data, size_t length, 
+                              FLAC_FrameHeader* header,
+                              const FLAC_StreamInfo* stream_info) {
+    if (!data || !header || length < 6) {
+        return 0;  // Minimum header size is 6 bytes
+    }
+    
+    // Check sync code (14 bits)
+    uint16_t sync_code = ((data[0] << 8) | data[1]) & 0xFFFE;
+    if (sync_code != FLAC_FRAME_SYNC_CODE) {
+        return 0;  // Invalid sync code
+    }
+    
+    header->blocking_strategy = (data[2] >> 7) & 0x01;
+    uint8_t block_size_code = (data[2] >> 3) & 0x0F;
+    uint8_t sample_rate_code = ((data[2] & 0x07) << 1) | ((data[3] >> 7) & 0x01);
+    header->channel_assignment = (data[3] >> 3) & 0x0F;
+    uint8_t sample_size_code = (data[3] & 0x07);
+    
+    // Variable-length frame/sample number (UTF-8 encoded)
+    size_t offset = 4;
+    uint64_t frame_number = 0;
+    uint8_t frame_number_bytes = 0;
+    
+    // Decode UTF-8 encoded frame/sample number
+    if (offset >= length) return 0;
+    
+    if ((data[offset] & 0x80) == 0) {
+        // 0xxxxxxx - 7 bits
+        frame_number = data[offset] & 0x7F;
+        frame_number_bytes = 1;
+    } else if ((data[offset] & 0xE0) == 0xC0) {
+        // 110xxxxx 10xxxxxx - 11 bits
+        if (offset + 1 >= length) return 0;
+        if ((data[offset+1] & 0xC0) != 0x80) return 0;
+        
+        frame_number = ((data[offset] & 0x1F) << 6) | (data[offset+1] & 0x3F);
+        frame_number_bytes = 2;
+    } else if ((data[offset] & 0xF0) == 0xE0) {
+        // 1110xxxx 10xxxxxx 10xxxxxx - 16 bits
+        if (offset + 2 >= length) return 0;
+        if ((data[offset+1] & 0xC0) != 0x80 || (data[offset+2] & 0xC0) != 0x80) return 0;
+        
+        frame_number = ((data[offset] & 0x0F) << 12) | 
+                       ((data[offset+1] & 0x3F) << 6) | 
+                       (data[offset+2] & 0x3F);
+        frame_number_bytes = 3;
+    } else if ((data[offset] & 0xF8) == 0xF0) {
+        // 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx - 21 bits
+        if (offset + 3 >= length) return 0;
+        if ((data[offset+1] & 0xC0) != 0x80 || 
+            (data[offset+2] & 0xC0) != 0x80 || 
+            (data[offset+3] & 0xC0) != 0x80) return 0;
+        
+        frame_number = ((data[offset] & 0x07) << 18) | 
+                       ((data[offset+1] & 0x3F) << 12) | 
+                       ((data[offset+2] & 0x3F) << 6) | 
+                       (data[offset+3] & 0x3F);
+        frame_number_bytes = 4;
+    } else {
+        return 0;  // Invalid UTF-8 encoding
+    }
+    
+    header->frame_number = frame_number;
+    offset += frame_number_bytes;
+    
+    // Parse block size if needed
+    if (block_size_code == 6) {
+        if (offset >= length) return 0;
+        header->block_size = data[offset++] + 1;
+    } else if (block_size_code == 7) {
+        if (offset + 1 >= length) return 0;
+        header->block_size = ((data[offset] << 8) | data[offset+1]) + 1;
+        offset += 2;
+    } else if (block_size_code == 0) {
+        return 0;  // Reserved value
+    } else if (block_size_code == 1) {
+        header->block_size = 192;
+    } else if (block_size_code >= 2 && block_size_code <= 5) {
+        header->block_size = 576 * (1 << (block_size_code - 2));
+    } else if (block_size_code >= 8 && block_size_code <= 15) {
+        header->block_size = 256 * (1 << (block_size_code - 8));
+    }
+    
+    // Parse sample rate if needed
+    if (sample_rate_code == 12) {
+        if (offset >= length) return 0;
+        header->sample_rate = data[offset++] * 1000;
+    } else if (sample_rate_code == 13) {
+        if (offset >= length) return 0;
+        header->sample_rate = data[offset++];
+    } else if (sample_rate_code == 14) {
+        if (offset + 1 >= length) return 0;
+        header->sample_rate = ((data[offset] << 8) | data[offset+1]);
+        offset += 2;
+    } else if (sample_rate_code == 0) {
+        // Get from STREAMINFO block
+        header->sample_rate = stream_info ? stream_info->sample_rate : 0;
+    } else if (sample_rate_code == 1) {
+        header->sample_rate = 88200;
+    } else if (sample_rate_code == 2) {
+        header->sample_rate = 176400;
+    } else if (sample_rate_code == 3) {
+        header->sample_rate = 192000;
+    } else if (sample_rate_code == 4) {
+        header->sample_rate = 8000;
+    } else if (sample_rate_code == 5) {
+        header->sample_rate = 16000;
+    } else if (sample_rate_code == 6) {
+        header->sample_rate = 22050;
+    } else if (sample_rate_code == 7) {
+        header->sample_rate = 24000;
+    } else if (sample_rate_code == 8) {
+        header->sample_rate = 32000;
+    } else if (sample_rate_code == 9) {
+        header->sample_rate = 44100;
+    } else if (sample_rate_code == 10) {
+        header->sample_rate = 48000;
+    } else if (sample_rate_code == 11) {
+        header->sample_rate = 96000;
+    } else if (sample_rate_code == 15) {
+        return 0;  // Invalid
+    }
+    
+    // Get sample size from code or STREAMINFO
+    if (sample_size_code == 0) {
+        // Get from STREAMINFO block
+        header->sample_size = stream_info ? stream_info->bits_per_sample : 0;
+    } else {
+        header->sample_size = get_flac_bits_per_sample(sample_size_code);
+    }
+    
+    // CRC-8
+    if (offset >= length) return 0;
+    header->crc8 = data[offset++];
+    
+    return offset;  // Return the total header size
+}
+
+/**
+ * @brief Get the number of channels from FLAC channel assignment
+ * @param channel_assignment Channel assignment code from frame header
+ * @return Number of channels
+ */
+static uint8_t get_flac_channels(uint8_t channel_assignment) {
+    if (channel_assignment <= 7) {
+        return channel_assignment + 1;
+    } else if (channel_assignment <= 10) {
+        return 2;  // Stereo, left/side, right/side, or mid/side
+    } else {
+        return 0;  // Reserved
+    }
+}
+
+/**
+ * @brief Get the bits per sample from FLAC sample size code
+ * @param sample_size_code Sample size code from frame header
+ * @return Bits per sample, or 0 if it should be obtained from STREAMINFO
+ */
+static uint8_t get_flac_bits_per_sample(uint8_t sample_size_code) {
+    switch (sample_size_code) {
+        case 0: return 0;      // Get from STREAMINFO block
+        case 1: return 8;
+        case 2: return 12;
+        case 3: return 16;
+        case 4: return 20;
+        case 5: return 24;
+        case 6: return 32;
+        case 7: return 0;      // Reserved
+        default: return 0;
+    }
+}
+
+/**
+ * @brief Find and validate a FLAC frame
+ * @param data Raw audio file data
+ * @param size Size of the data buffer
+ * @param offset Starting offset to search from
+ * @param frame_info Output parameter for frame information
+ * @return Offset of the next frame, or 0 if no valid frame found
+ */
+size_t find_flac_frame(const uint8_t* data, size_t size, size_t offset, 
+                      FLAC_FrameHeader* frame_info) {
+    if (!data || !frame_info || offset >= size) {
+        return 0;
+    }
+    
+    // Search for FLAC frame sync code
+    while (offset + FLAC_MAX_FRAME_HEADER_SIZE <= size) {
+        size_t header_size = parse_flac_frame_header(data + offset, size - offset, frame_info, NULL);
+        if (header_size > 0) {
+            return offset + header_size;
+        }
+        offset++;
+    }
+    
+    return 0;  // No valid frame found
 }
 
 // Update the detect_format function to include FLAC detection
