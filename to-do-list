@@ -16,7 +16,6 @@ include/nuno/format_handlers.h:
 
 
 include/nuno/format_decoder.h:
-- Define buffer requirements per format
 - Create error handling structures
 - Add FLAC-specific error codes and handling:
   - Invalid FLAC stream

@@ -4,24 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Move format info struct definition to header file
-struct AudioFormatInfo {
-    size_t offset;          // Offset to first audio frame
-    bool has_vbr;          // Whether file has variable bitrate
-    uint8_t channel_mode;   // Channel configuration
-    uint32_t sampling_rate; // Sample rate in Hz
-};
-
-enum FormatDecoderError {
-    FD_ERROR_NONE = 0,
-    FD_ERROR_INVALID_PARAM,
-    FD_ERROR_FILE_NOT_FOUND,
-    FD_ERROR_FILE_READ,
-    FD_ERROR_INVALID_FORMAT,
-    FD_ERROR_MEMORY,
-    FD_ERROR_DECODE
-};
-
 struct FormatDecoder {
     mp3dec_t mp3d;
     mp3dec_file_info_t info;
@@ -31,6 +13,18 @@ struct FormatDecoder {
     enum FormatDecoderError last_error;
 };
 
+// Buffer requirement constants for MP3
+#define MP3_MIN_BUFFER_SIZE (2 * 1152 * 2 * sizeof(float))  // 2 frames * max samples per frame * stereo * float size
+#define MP3_OPTIMAL_BUFFER_SIZE (32 * 1152 * 2 * sizeof(float))  // 32 frames worth of data
+#define MP3_MAX_FRAME_SIZE (1152 * 2 * sizeof(float))  // Max samples per frame * stereo * float size
+#define MP3_FRAMES_PER_BUFFER 32  // Recommended frames per buffer
+
+// Buffer requirement constants for FLAC
+#define FLAC_MIN_BUFFER_SIZE (4096 * 8 * sizeof(float))  // Minimum block size * max channels * float size
+#define FLAC_OPTIMAL_BUFFER_SIZE (65536 * 8 * sizeof(float))  // Optimal for efficient decoding
+#define FLAC_MAX_FRAME_SIZE (65536 * 8 * sizeof(float))  // Maximum block size * max channels * float size
+#define FLAC_FRAMES_PER_BUFFER 4  // FLAC frames are larger, so fewer per buffer
+
 FormatDecoder* format_decoder_create(void) {
     FormatDecoder* decoder = (FormatDecoder*)malloc(sizeof(FormatDecoder));
     if (!decoder) return NULL;
@@ -38,6 +32,7 @@ FormatDecoder* format_decoder_create(void) {
     decoder->position = 0;
     decoder->initialized = false;
     decoder->last_error = FD_ERROR_NONE;
+    decoder->format_info.format_type = AUDIO_FORMAT_UNKNOWN;
     mp3dec_init(&decoder->mp3d);
     
     return decoder;
@@ -137,6 +132,46 @@ uint32_t format_decoder_get_channels(const FormatDecoder* decoder) {
 
 uint32_t format_decoder_get_sample_rate(const FormatDecoder* decoder) {
     return decoder && decoder->initialized ? decoder->info.hz : 0;
+}
+
+enum AudioFormatType format_decoder_get_format_type(const FormatDecoder* decoder) {
+    return decoder ? decoder->format_info.format_type : AUDIO_FORMAT_UNKNOWN;
+}
+
+bool format_decoder_get_buffer_requirements(enum AudioFormatType format_type, 
+                                           BufferRequirements* requirements) {
+    if (!requirements) return false;
+    
+    switch (format_type) {
+        case AUDIO_FORMAT_MP3:
+            requirements->min_buffer_size = MP3_MIN_BUFFER_SIZE;
+            requirements->optimal_buffer_size = MP3_OPTIMAL_BUFFER_SIZE;
+            requirements->max_frame_size = MP3_MAX_FRAME_SIZE;
+            requirements->frames_per_buffer = MP3_FRAMES_PER_BUFFER;
+            return true;
+            
+        case AUDIO_FORMAT_FLAC:
+            requirements->min_buffer_size = FLAC_MIN_BUFFER_SIZE;
+            requirements->optimal_buffer_size = FLAC_OPTIMAL_BUFFER_SIZE;
+            requirements->max_frame_size = FLAC_MAX_FRAME_SIZE;
+            requirements->frames_per_buffer = FLAC_FRAMES_PER_BUFFER;
+            return true;
+            
+        default:
+            // For unsupported formats, return false
+            return false;
+    }
+}
+
+bool format_decoder_get_current_buffer_requirements(const FormatDecoder* decoder,
+                                                  BufferRequirements* requirements) {
+    if (!decoder || !requirements) return false;
+    
+    // If no file is loaded, return false
+    if (!decoder->initialized) return false;
+    
+    // Get requirements based on the format type of the loaded file
+    return format_decoder_get_buffer_requirements(decoder->format_info.format_type, requirements);
 }
 
 enum FormatDecoderError format_decoder_get_last_error(const FormatDecoder* decoder) {
