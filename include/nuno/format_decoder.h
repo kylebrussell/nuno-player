@@ -45,6 +45,70 @@ typedef struct AudioFormatInfo {
 } AudioFormatInfo;
 
 /**
+ * Supported bit depths for audio decoding
+ */
+enum AudioBitDepth {
+    BIT_DEPTH_8 = 8,
+    BIT_DEPTH_16 = 16,
+    BIT_DEPTH_24 = 24,
+    BIT_DEPTH_32 = 32,
+    BIT_DEPTH_FLOAT = 0xFF  // Special value for float format
+};
+
+/**
+ * Seeking behavior options
+ */
+enum SeekingBehavior {
+    SEEK_ACCURATE,          // Precise seeking (may be slower)
+    SEEK_FAST,              // Fast seeking (may be less accurate)
+    SEEK_NEAREST_KEYFRAME   // Seek to nearest keyframe (for compressed formats)
+};
+
+/**
+ * Error handling preferences
+ */
+enum ErrorHandlingMode {
+    ERROR_STRICT,           // Fail on any error
+    ERROR_TOLERANT,         // Try to continue on non-critical errors
+    ERROR_REPAIR            // Attempt to repair corrupted data
+};
+
+/**
+ * Format decoder capabilities
+ * Describes what a specific decoder implementation can support
+ */
+typedef struct DecoderCapabilities {
+    uint32_t max_sample_rate;           // Maximum supported sample rate in Hz
+    uint32_t min_sample_rate;           // Minimum supported sample rate in Hz
+    enum AudioBitDepth supported_depths[4]; // Array of supported bit depths (zero-terminated)
+    uint8_t max_channels;               // Maximum number of audio channels supported
+    bool supports_vbr;                  // Whether variable bitrate is supported
+    bool supports_seeking;              // Whether seeking is supported
+    bool supports_streaming;            // Whether streaming is supported
+    bool supports_gapless;              // Whether gapless playback is supported
+    bool supports_replaygain;           // Whether ReplayGain is supported
+    size_t max_buffer_size;             // Maximum buffer size supported
+} DecoderCapabilities;
+
+/**
+ * Decoder configuration options
+ * Used to configure decoder behavior
+ */
+typedef struct DecoderConfig {
+    enum SeekingBehavior seeking_behavior;  // How seeking should be performed
+    enum ErrorHandlingMode error_mode;      // How errors should be handled
+    size_t buffer_size;                     // Preferred buffer size in bytes
+    bool use_float_output;                  // Whether to output float samples
+    bool enable_replaygain;                 // Whether to apply ReplayGain
+    float replaygain_preamp;                // ReplayGain preamp value in dB
+    bool enable_gapless;                    // Whether to enable gapless playback
+    bool enable_caching;                    // Whether to cache decoded data
+    size_t cache_size;                      // Size of cache in bytes
+    uint32_t target_sample_rate;            // Target sample rate (0 = native)
+    enum AudioBitDepth target_bit_depth;    // Target bit depth (0 = native)
+} DecoderConfig;
+
+/**
  * Buffer requirements for different audio formats
  */
 typedef struct BufferRequirements {
@@ -138,6 +202,31 @@ bool format_decoder_get_buffer_requirements(enum AudioFormatType format_type,
  */
 bool format_decoder_get_current_buffer_requirements(const FormatDecoder* decoder,
                                                   BufferRequirements* requirements);
+
+/**
+ * Gets the capabilities of a specific decoder format
+ * @param format_type The audio format type
+ * @param capabilities Output parameter for decoder capabilities
+ * @return true if successful, false if format is not supported
+ */
+bool format_decoder_get_capabilities(enum AudioFormatType format_type,
+                                    DecoderCapabilities* capabilities);
+
+/**
+ * Configures the decoder with specific options
+ * @param decoder The decoder instance
+ * @param config Configuration options
+ * @return true if successful, false if configuration failed
+ */
+bool format_decoder_configure(FormatDecoder* decoder, const DecoderConfig* config);
+
+/**
+ * Gets the current decoder configuration
+ * @param decoder The decoder instance
+ * @param config Output parameter for current configuration
+ * @return true if successful, false if decoder is invalid
+ */
+bool format_decoder_get_config(const FormatDecoder* decoder, DecoderConfig* config);
 
 /**
  * Gets the last error that occurred

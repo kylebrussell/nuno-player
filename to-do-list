@@ -16,45 +16,24 @@ include/nuno/format_handlers.h:
 
 
 include/nuno/format_decoder.h:
-- Create error handling structures
 - Add FLAC-specific error codes and handling:
   - Invalid FLAC stream
   - Unsupported FLAC feature
   - Frame decode error
   - CRC mismatch
-- Define decoder configuration and capabilities:
-  - Memory buffer size requirements per format
-  - Format-specific configuration options
-  - Seeking behavior settings
-  - Error handling preferences
-  - Maximum supported sample rates
-  - Supported bit depths
-  - Seeking capabilities
 
 src/core/audio/format_decoder.c:
-- Add FLAC decoder state management:
-  - Track current frame position
-  - Store stream parameters
-  - Maintain decode buffer state
 - Implement FLAC format detection in format_decoder_open
-- Add FLAC-specific initialization:
-  - Allocate decode buffers
-  - Initialize subframe buffers
-  - Set up prediction contexts
 - Create FLAC frame decoding pipeline:
   - Frame synchronization
   - Header decoding
   - Subframe decoding
   - Sample reconstruction
   - Inter-channel decorrelation
-- Implement efficient sample format conversion:
-  - FLAC internal format to float conversion
-  - Handle different bit depths (16/24 bit)
-- Add seeking support:
+- Implement FLAC-specific seeking:
   - Use SEEKTABLE if available
   - Implement binary search seeking if no SEEKTABLE
   - Ensure frame alignment when seeking
-- Implement proper cleanup in format_decoder_close for FLAC resources
 
 tests/core/filesystem_tests.c:
 - Create test suite for filesystem operations
