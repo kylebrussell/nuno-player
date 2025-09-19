@@ -90,6 +90,18 @@ static inline Uint8 clamp_u8(int value) {
     return (Uint8)value;
 }
 
+static SDL_Color lerpColor(SDL_Color a, SDL_Color b, float t) {
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    SDL_Color result = {
+        clamp_u8((int)((1.0f - t) * a.r + t * b.r)),
+        clamp_u8((int)((1.0f - t) * a.g + t * b.g)),
+        clamp_u8((int)((1.0f - t) * a.b + t * b.b)),
+        clamp_u8((int)((1.0f - t) * a.a + t * b.a))
+    };
+    return result;
+}
+
 static void drawGlyphClipped(const GlyphPattern *glyph, int originX, int originY, SDL_Color color, const SDL_Rect *clip) {
     if (!renderer || !glyph) {
         return;
@@ -173,8 +185,15 @@ static void renderDisplayBezel(void) {
     SDL_Color edgeDark = {140, 140, 148, 255};
     SDL_Color edgeLight = {244, 244, 248, 255};
 
-    SDL_SetRenderDrawColor(renderer, outerColor.r, outerColor.g, outerColor.b, outerColor.a);
-    SDL_RenderFillRect(renderer, &outer);
+    SDL_Color gradientTop = {228, 230, 235, 255};
+    SDL_Color gradientBottom = {182, 186, 192, 255};
+
+    for (int i = 0; i < outer.h; ++i) {
+        float t = (float)i / (float)(outer.h - 1);
+        SDL_Color rowColor = lerpColor(gradientTop, gradientBottom, t);
+        SDL_SetRenderDrawColor(renderer, rowColor.r, rowColor.g, rowColor.b, rowColor.a);
+        SDL_RenderDrawLine(renderer, outer.x, outer.y + i, outer.x + outer.w - 1, outer.y + i);
+    }
 
     SDL_SetRenderDrawColor(renderer, midColor.r, midColor.g, midColor.b, midColor.a);
     SDL_RenderFillRect(renderer, &mid);
@@ -185,13 +204,13 @@ static void renderDisplayBezel(void) {
     SDL_SetRenderDrawColor(renderer, edgeLight.r, edgeLight.g, edgeLight.b, edgeLight.a);
     SDL_RenderDrawRect(renderer, &highlightInner);
 
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 18);
-    SDL_RenderDrawLine(renderer, outer.x, outer.y, outer.x + outer.w - 1, outer.y);
-    SDL_RenderDrawLine(renderer, outer.x, outer.y, outer.x, outer.y + outer.h - 1);
+    SDL_SetRenderDrawColor(renderer, 250, 250, 253, 60);
+    SDL_RenderDrawLine(renderer, outer.x + 1, outer.y + 1, outer.x + outer.w - 2, outer.y + 1);
+    SDL_RenderDrawLine(renderer, outer.x + 1, outer.y + 1, outer.x + 1, outer.y + outer.h - 2);
 
-    SDL_SetRenderDrawColor(renderer, 120, 120, 124, 50);
-    SDL_RenderDrawLine(renderer, outer.x + outer.w - 1, outer.y, outer.x + outer.w - 1, outer.y + outer.h - 1);
-    SDL_RenderDrawLine(renderer, outer.x, outer.y + outer.h - 1, outer.x + outer.w - 1, outer.y + outer.h - 1);
+    SDL_SetRenderDrawColor(renderer, 120, 120, 124, 70);
+    SDL_RenderDrawLine(renderer, outer.x + outer.w - 2, outer.y + 1, outer.x + outer.w - 2, outer.y + outer.h - 2);
+    SDL_RenderDrawLine(renderer, outer.x + 1, outer.y + outer.h - 2, outer.x + outer.w - 2, outer.y + outer.h - 2);
 }
 
 static void drawCircleOutline(int cx, int cy, int radius, SDL_Color color) {
