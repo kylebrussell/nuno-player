@@ -1,63 +1,87 @@
-// main_ui_test.c
-#include "ui_state.h"
 #include "menu_renderer.h"
+#include "ui_state.h"
 #include "ui_tasks.h"
+#include "nuno/display.h"
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 
-extern void Display_Clear(void);
-extern void Display_Update(void);
-extern void Display_DrawText(const char* text, int x, int y, uint8_t color);
-extern void Display_DrawRect(int x, int y, int width, int height, uint8_t color);
-extern void Display_FillRect(int x, int y, int width, int height, uint8_t color);
+static void handleKeyEvent(SDL_Keysym keysym, UIState *state, uint32_t currentTime) {
+    switch (keysym.sym) {
+        case SDLK_UP:
+        case SDLK_k:
+            handleRotation(state, -1, currentTime);
+            break;
+        case SDLK_DOWN:
+        case SDLK_j:
+            handleRotation(state, 1, currentTime);
+            break;
+        case SDLK_LEFT:
+        case SDLK_BACKSPACE:
+        case SDLK_ESCAPE:
+            handleButtonPress(state, BUTTON_MENU, currentTime);
+            break;
+        case SDLK_RIGHT:
+            handleButtonPress(state, BUTTON_NEXT, currentTime);
+            break;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            handleButtonPress(state, BUTTON_CENTER, currentTime);
+            break;
+        case SDLK_SPACE:
+            handleButtonPress(state, BUTTON_PLAY, currentTime);
+            break;
+        default:
+            break;
+    }
+}
 
-int main(int argc, char* argv[]) {
-    // Initialize SDL (using our SDL mock display code)
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        SDL_Log("SDL_Init Error: %s", SDL_GetError());
+int main(void) {
+    if (!Display_Init("NUNO Simulator")) {
         return 1;
     }
-    SDL_Window *window = SDL_CreateWindow("UI Test",
-                                          SDL_WINDOWPOS_CENTERED,
-                                          SDL_WINDOWPOS_CENTERED,
-                                          DISPLAY_WIDTH * 4,
-                                          DISPLAY_HEIGHT * 4,
-                                          SDL_WINDOW_SHOWN);
-    SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-    if (!renderer) {
-        SDL_Log("SDL_CreateRenderer Error: %s", SDL_GetError());
-        SDL_DestroyWindow(window);
-        SDL_Quit();
+
+    if (!MenuRenderer_Init()) {
+        Display_Shutdown();
         return 1;
     }
-    
-    // Hook our renderer into the SDL mock display functions if needed,
-    // or simply compile/link them together.
-    
-    // Set up your UI state
+
     UIState uiState;
     initUIState(&uiState);
-    
-    uint32_t startTime = SDL_GetTicks();
+
     bool running = true;
-    SDL_Event e;
-    
+    SDL_Event event;
+
     while (running) {
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT)
-                running = false;
-            // Map SDL events to your UI events if desired (simulate click wheel, etc.)
+        uint32_t currentTime = SDL_GetTicks();
+
+        while (SDL_PollEvent(&event)) {
+            switch (event.type) {
+                case SDL_QUIT:
+                    running = false;
+                    break;
+                case SDL_KEYDOWN:
+                    if (!event.key.repeat) {
+                        handleKeyEvent(event.key.keysym, &uiState, currentTime);
+                    }
+                    break;
+                case SDL_MOUSEWHEEL:
+                    if (event.wheel.y > 0) {
+                        handleRotation(&uiState, -1, currentTime);
+                    } else if (event.wheel.y < 0) {
+                        handleRotation(&uiState, 1, currentTime);
+                    }
+                    break;
+                default:
+                    break;
+            }
         }
-        
-        uint32_t currentTime = SDL_GetTicks() - startTime;
-        // Call your UI render routine which internally calls Display_Clear, DrawText, etc.
+
         MenuRenderer_Render(&uiState, currentTime);
-        
-        SDL_Delay(16); // ~60 FPS
+        SDL_Delay(16);
     }
-    
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
+
+    Display_Shutdown();
     SDL_Quit();
     return 0;
 }

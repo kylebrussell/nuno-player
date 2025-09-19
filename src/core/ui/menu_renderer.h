@@ -2,14 +2,8 @@
 #define MENU_RENDERER_H
 
 #include "ui_state.h"
+#include "nuno/display.h"
 #include <stdint.h>
-
-// Display interface functions - implement these for your hardware
-void Display_Clear(void);
-void Display_Update(void);
-void Display_DrawText(const char* text, int x, int y, uint8_t color);
-void Display_DrawRect(int x, int y, int width, int height, uint8_t color);
-void Display_FillRect(int x, int y, int width, int height, uint8_t color);
 
 /**
  * @brief Initialize the menu renderer

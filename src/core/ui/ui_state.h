@@ -4,13 +4,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "nuno/display.h"
+
 #define MAX_MENU_ITEMS 10
 #define MAX_TITLE_LENGTH 32
 #define MAX_ITEM_LENGTH 32
 
-// Display constants
-#define DISPLAY_WIDTH 160
-#define DISPLAY_HEIGHT 128
+// Layout constants
 #define ITEM_HEIGHT 16
 #define TEXT_HEIGHT 12
 #define TEXT_MARGIN 4
@@ -55,6 +55,8 @@ typedef struct UIState {
     uint16_t totalTrackTime;    // in seconds
     char currentTrackTitle[MAX_TITLE_LENGTH];
     char currentArtist[MAX_TITLE_LENGTH];
+    MenuType navigationStack[8];
+    uint8_t navigationDepth;
 } UIState;
 
 // Menu navigation functions
@@ -63,5 +65,6 @@ void selectMenuItem(UIState* state);
 void scrollUp(UIState* state);
 void scrollDown(UIState* state);
 void goBack(UIState* state);
+void navigateToMenu(UIState* state, MenuType menuType);
 
 #endif /* UI_STATE_H */

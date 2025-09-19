@@ -12,6 +12,29 @@ Currently in the early stages of development, focusing on core embedded systems 
 - Hardware abstraction layer
 - Core platform drivers (I2C, GPIO, DMA)
 
+## Simulator Quick Start
+
+You can exercise the UI and menu flow locally without the embedded toolchain by building the SDL2 simulator target:
+
+1. Ensure dependencies are installed (macOS examples shown):
+   - `brew install cmake`
+   - `brew install sdl2`
+2. Configure and build the simulator:
+   ```bash
+   cmake -S . -B build -DBUILD_TESTS=OFF
+   cmake --build build --target nuno-sim
+   ```
+3. Launch the simulator:
+   ```bash
+   ./build/nuno-sim
+   ```
+
+### Simulator Controls
+- Arrow keys or `j`/`k` – scroll through menu items
+- `Enter` – select menu item
+- `Backspace` or `Esc` – go back
+- `Space` – toggle play/pause state indicator
+
 ## Features (Planned)
 
 ### Audio

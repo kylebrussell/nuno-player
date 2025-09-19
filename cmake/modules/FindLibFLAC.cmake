@@ -1,40 +1,41 @@
 # LibFLAC find module
 include(FindPackageHandleStandardArgs)
 
-# Create the main libFLAC library
+get_filename_component(NUNO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+set(FLAC_SOURCE_DIR "${NUNO_ROOT}/external/libflac")
+
 add_library(libflac STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/bitmath.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/bitreader.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/bitwriter.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/cpu.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/crc.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/fixed.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/float.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/format.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/lpc.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/md5.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/memory.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/metadata_iterators.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/metadata_object.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/stream_decoder.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/stream_encoder.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/stream_encoder_framing.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/window.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/bitmath.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/bitreader.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/bitwriter.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/cpu.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/crc.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/fixed.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/float.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/format.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/lpc.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/md5.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/memory.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/metadata_iterators.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/metadata_object.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/stream_decoder.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/stream_encoder.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/stream_encoder_framing.c
+    ${FLAC_SOURCE_DIR}/src/libFLAC/window.c
 )
 
-# Define build options
 target_compile_definitions(libflac PRIVATE
     FLAC__NO_DLL
     HAVE_CONFIG_H
     FLAC__NO_ASM
+    PACKAGE_VERSION="1.4.3"
 )
 
-target_include_directories(libflac PUBLIC 
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/libflac/src/libFLAC/include
+target_include_directories(libflac PUBLIC
+    ${FLAC_SOURCE_DIR}/include
+    ${FLAC_SOURCE_DIR}/src/libFLAC/include
 )
 
-# Create an alias target with namespace
 add_library(LibFLAC::FLAC ALIAS libflac)
 
-find_package_handle_standard_args(LibFLAC DEFAULT_MSG) 
+find_package_handle_standard_args(LibFLAC DEFAULT_MSG)

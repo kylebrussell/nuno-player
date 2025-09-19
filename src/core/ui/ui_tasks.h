@@ -6,13 +6,6 @@
 #include <stdint.h>
 
 /**
- * @brief Initialize the UI task system and state
- * @param state Pointer to UIState structure to initialize
- * @return true if initialization successful, false otherwise
- */
-void initUIState(UIState* state);
-
-/**
  * @brief Process UI input events and update state
  * @param state Pointer to current UI state
  * @param currentTime Current system time in milliseconds
@@ -50,13 +43,6 @@ void updateTrackInfo(UIState* state,
 void updateVolume(UIState* state, uint8_t volume);
 
 /**
- * @brief Navigate to a specific menu
- * @param state Pointer to UI state
- * @param menuType Target menu to display
- */
-void navigateToMenu(UIState* state, MenuType menuType);
-
-/**
  * @brief Handle click wheel rotation event
  * @param state Pointer to UI state
  * @param direction Rotation direction (positive for clockwise, negative for counter-clockwise)
@@ -78,14 +64,5 @@ void handleButtonPress(UIState* state, uint8_t button, uint32_t currentTime);
 #define BUTTON_PLAY      0x04
 #define BUTTON_PREV      0x08
 #define BUTTON_NEXT      0x10
-
-// Menu navigation constants
-#define ITEMS_PER_SCREEN 6
-#define SCROLL_THRESHOLD 3  // Items from edge to trigger scroll
-
-// Timing constants
-#define BUTTON_REPEAT_DELAY_MS    500   // Delay before button repeat starts
-#define BUTTON_REPEAT_INTERVAL_MS 100   // Interval between repeated actions
-#define SCROLL_ANIMATION_TIME_MS  150   // Duration of scroll animation
 
 #endif // UI_TASKS_H

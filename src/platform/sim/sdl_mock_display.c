@@ -1,94 +1,107 @@
-// sdl_mock_display.c
+#include "nuno/display.h"
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
-
-#define DISPLAY_WIDTH  160
-#define DISPLAY_HEIGHT 128
 
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
 
-// Basic display API implementations
+bool Display_Init(const char *title) {
+    if (SDL_WasInit(SDL_INIT_VIDEO) == 0) {
+        if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+            fprintf(stderr, "SDL_Init Error: %s\n", SDL_GetError());
+            return false;
+        }
+    }
+
+    if (!title) {
+        title = "NUNO Player";
+    }
+
+    const int scale = 4;
+    window = SDL_CreateWindow(title,
+                              SDL_WINDOWPOS_CENTERED,
+                              SDL_WINDOWPOS_CENTERED,
+                              DISPLAY_WIDTH * scale,
+                              DISPLAY_HEIGHT * scale,
+                              SDL_WINDOW_SHOWN);
+    if (!window) {
+        fprintf(stderr, "SDL_CreateWindow Error: %s\n", SDL_GetError());
+        Display_Shutdown();
+        return false;
+    }
+
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!renderer) {
+        fprintf(stderr, "SDL_CreateRenderer Error: %s\n", SDL_GetError());
+        Display_Shutdown();
+        return false;
+    }
+
+    SDL_RenderSetLogicalSize(renderer, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+
+    return true;
+}
+
+void Display_Shutdown(void) {
+    if (renderer) {
+        SDL_DestroyRenderer(renderer);
+        renderer = NULL;
+    }
+    if (window) {
+        SDL_DestroyWindow(window);
+        window = NULL;
+    }
+    if (SDL_WasInit(SDL_INIT_VIDEO)) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    }
+}
 
 void Display_Clear(void) {
-    // White BG
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    if (!renderer) {
+        return;
+    }
+    SDL_SetRenderDrawColor(renderer, 245, 245, 245, 255);
     SDL_RenderClear(renderer);
 }
 
 void Display_Update(void) {
+    if (!renderer) {
+        return;
+    }
     SDL_RenderPresent(renderer);
 }
 
 void Display_DrawText(const char* text, int x, int y, uint8_t color) {
-    // Minimal stub: Instead of real text, draw a filled rect as placeholder.
-    SDL_Rect r = { x, y, 50, 12 };
-    // Use black for text (ignoring 'color' for now)
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    (void)text;
+    if (!renderer) {
+        return;
+    }
+    SDL_Rect r = { x, y, 64, 12 };
+    uint8_t shade = (color == 0) ? 0 : 20;
+    SDL_SetRenderDrawColor(renderer, shade, shade, shade, 255);
     SDL_RenderFillRect(renderer, &r);
-    // In a real setup, you'd use SDL_ttf here.
 }
 
 void Display_DrawRect(int x, int y, int width, int height, uint8_t color) {
+    if (!renderer) {
+        return;
+    }
+    uint8_t shade = (color == 0) ? 0 : 20;
+    SDL_SetRenderDrawColor(renderer, shade, shade, shade, 255);
     SDL_Rect r = { x, y, width, height };
-    if (color == 0)
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    else
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderDrawRect(renderer, &r);
 }
 
 void Display_FillRect(int x, int y, int width, int height, uint8_t color) {
-    SDL_Rect r = { x, y, width, height };
-    if (color == 0)
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    else
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderFillRect(renderer, &r);
-}
-
-int main(int argc, char* argv[]) {
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        printf("SDL_Init Error: %s\n", SDL_GetError());
-        return 1;
-    }
-    // Scale window up for easier viewing (4x scale)
-    window = SDL_CreateWindow("SDL Mock Display", SDL_WINDOWPOS_CENTERED,
-                              SDL_WINDOWPOS_CENTERED, DISPLAY_WIDTH * 4, DISPLAY_HEIGHT * 4,
-                              SDL_WINDOW_SHOWN);
-    if (!window) {
-        printf("SDL_CreateWindow Error: %s\n", SDL_GetError());
-        SDL_Quit();
-        return 1;
-    }
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer) {
-        SDL_DestroyWindow(window);
-        printf("SDL_CreateRenderer Error: %s\n", SDL_GetError());
-        SDL_Quit();
-        return 1;
+        return;
     }
-    
-    bool running = true;
-    SDL_Event e;
-    while (running) {
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT)
-                running = false;
-        }
-        // Simulate UI rendering cycle:
-        Display_Clear();
-        // For demo, draw a black filled rectangle and a "text" placeholder
-        Display_FillRect(10, 10, 50, 20, 0);
-        Display_DrawText("Hello", 15, 15, 0);
-        Display_DrawRect(5, 5, DISPLAY_WIDTH - 10, DISPLAY_HEIGHT - 10, 0);
-        Display_Update();
-        SDL_Delay(16); // ~60 FPS
-    }
-    
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
-    return 0;
+    uint8_t shade = (color == 0) ? 0 : 20;
+    SDL_SetRenderDrawColor(renderer, shade, shade, shade, 255);
+    SDL_Rect r = { x, y, width, height };
+    SDL_RenderFillRect(renderer, &r);
 }

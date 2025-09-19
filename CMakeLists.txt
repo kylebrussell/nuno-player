@@ -34,8 +34,10 @@ if(NOT BUILD_SIM)
   find_package(FreeRTOS REQUIRED)
 endif()
 
-# Find libFLAC
-find_package(LibFLAC REQUIRED)
+# Audio core is only required for embedded builds.
+if(NOT BUILD_SIM)
+  find_package(LibFLAC REQUIRED)
+endif()
 
 # Libraries
 add_library(drivers
@@ -46,16 +48,30 @@ target_include_directories(drivers PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-add_library(core
+add_library(core_audio
     src/core/audio/audio_pipeline.c
     src/core/audio/audio_buffer.c
 )
-target_include_directories(core PUBLIC
+target_include_directories(core_audio PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
-target_link_libraries(core PUBLIC
-    libflac
+if(NOT BUILD_SIM)
+  target_link_libraries(core_audio PUBLIC
+      LibFLAC::FLAC
+  )
+endif()
+
+add_library(core_ui
+    src/core/ui/menu_renderer.c
+    src/core/ui/menu_items.c
+    src/core/ui/ui_state.c
+    src/core/ui/ui_tasks.c
+)
+target_include_directories(core_ui PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/ui"
 )
 
 add_library(platform
@@ -75,7 +91,8 @@ if(NOT BUILD_SIM)
   )
   target_link_libraries(nuno-player
       drivers
-      core
+      core_audio
+      core_ui
       platform
       freertos_kernel
   )
@@ -95,11 +112,27 @@ if(BUILD_SIM)
   target_include_directories(nuno-sim PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/src"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/core/ui"
   )
   target_link_libraries(nuno-sim
-      core
+      core_ui
       SDL2::SDL2
   )
+  if (TARGET SDL2::SDL2main)
+    target_link_libraries(nuno-sim SDL2::SDL2main)
+  endif()
+  if (TARGET SDL2::SDL2)
+    get_target_property(_sdl2_includes SDL2::SDL2 INTERFACE_INCLUDE_DIRECTORIES)
+    if (_sdl2_includes)
+      set(_sdl2_parent_dirs "")
+      foreach(_dir IN LISTS _sdl2_includes)
+        get_filename_component(_parent "${_dir}" DIRECTORY)
+        list(APPEND _sdl2_parent_dirs ${_parent})
+      endforeach()
+      list(REMOVE_DUPLICATES _sdl2_parent_dirs)
+      target_include_directories(nuno-sim PRIVATE ${_sdl2_parent_dirs})
+    endif()
+  endif()
 endif()
 
 if(BUILD_TESTS)
