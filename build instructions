@@ -13,4 +13,4 @@
    ./build/nuno-sim
    ```
 
-Controls: arrow keys (`j`/`k`) scroll, `Enter` selects, `Backspace`/`Esc` backs out, `Space` toggles play/pause.
+Controls: arrow keys (`j`/`k`) or mouse wheel scroll, `Enter` selects, `Backspace`/`Esc` backs out, `Space` toggles play/pause.

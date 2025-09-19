@@ -31,6 +31,7 @@ You can exercise the UI and menu flow locally without the embedded toolchain by 
 
 ### Simulator Controls
 - Arrow keys or `j`/`k` – scroll through menu items
+- Mouse wheel – scroll through menu items
 - `Enter` – select menu item
 - `Backspace` or `Esc` – go back
 - `Space` – toggle play/pause state indicator

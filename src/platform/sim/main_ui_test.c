@@ -77,6 +77,7 @@ int main(void) {
             }
         }
 
+        processUIEvents(&uiState, currentTime);
         MenuRenderer_Render(&uiState, currentTime);
         SDL_Delay(16);
     }
