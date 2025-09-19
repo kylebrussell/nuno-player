@@ -113,15 +113,20 @@ static void drawGlyphClipped(const GlyphPattern *glyph, int originX, int originY
 }
 
 static void beginDisplayDraw(void) {
-    if (renderer) {
-        SDL_RenderSetClipRect(renderer, &DISPLAY_RECT);
+    if (!renderer) {
+        return;
     }
+    SDL_RenderSetViewport(renderer, &DISPLAY_RECT);
+    SDL_Rect clip = {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT};
+    SDL_RenderSetClipRect(renderer, &clip);
 }
 
 static void endDisplayDraw(void) {
-    if (renderer) {
-        SDL_RenderSetClipRect(renderer, NULL);
+    if (!renderer) {
+        return;
     }
+    SDL_RenderSetClipRect(renderer, NULL);
+    SDL_RenderSetViewport(renderer, NULL);
 }
 
 static void renderBrushedBackground(void) {
@@ -129,14 +134,56 @@ static void renderBrushedBackground(void) {
         return;
     }
 
-    for (int y = 0; y < SIM_TOTAL_HEIGHT; ++y) {
-        float t = (float)y / (float)SIM_TOTAL_HEIGHT;
-        int base = (int)(210 - 40 * t);
+    for (int y = 0; y < SIM_CANVAS_HEIGHT; ++y) {
+        float t = (float)y / (float)SIM_CANVAS_HEIGHT;
+        int base = (int)(205 - 35 * t);
         int noise = (int)(12 * sinf((float)y * 0.35f));
         Uint8 shade = clamp_u8(base + noise);
-        SDL_SetRenderDrawColor(renderer, shade, shade, shade + 8, 255);
-        SDL_RenderDrawLine(renderer, 0, y, DISPLAY_WIDTH, y);
+        SDL_SetRenderDrawColor(renderer, shade, shade, shade + 6, 255);
+        SDL_RenderDrawLine(renderer, 0, y, SIM_CANVAS_WIDTH, y);
     }
+}
+
+static void renderDisplayBezel(void) {
+    if (!renderer) {
+        return;
+    }
+
+    SDL_Rect outer = {
+        DISPLAY_RECT.x - 8,
+        DISPLAY_RECT.y - 8,
+        DISPLAY_RECT.w + 16,
+        DISPLAY_RECT.h + 16
+    };
+    SDL_Rect mid = {
+        DISPLAY_RECT.x - 4,
+        DISPLAY_RECT.y - 4,
+        DISPLAY_RECT.w + 8,
+        DISPLAY_RECT.h + 8
+    };
+    SDL_Rect highlight = {
+        DISPLAY_RECT.x - 1,
+        DISPLAY_RECT.y - 1,
+        DISPLAY_RECT.w + 2,
+        DISPLAY_RECT.h + 2
+    };
+
+    SDL_Color outerColor = {170, 170, 175, 255};
+    SDL_Color midColor = {208, 208, 212, 255};
+    SDL_Color edgeDark = {130, 130, 135, 255};
+    SDL_Color edgeLight = {238, 238, 242, 255};
+
+    SDL_SetRenderDrawColor(renderer, outerColor.r, outerColor.g, outerColor.b, outerColor.a);
+    SDL_RenderFillRect(renderer, &outer);
+
+    SDL_SetRenderDrawColor(renderer, midColor.r, midColor.g, midColor.b, midColor.a);
+    SDL_RenderFillRect(renderer, &mid);
+
+    SDL_SetRenderDrawColor(renderer, edgeDark.r, edgeDark.g, edgeDark.b, edgeDark.a);
+    SDL_RenderDrawRect(renderer, &mid);
+
+    SDL_SetRenderDrawColor(renderer, edgeLight.r, edgeLight.g, edgeLight.b, edgeLight.a);
+    SDL_RenderDrawRect(renderer, &highlight);
 }
 
 static void drawCircleOutline(int cx, int cy, int radius, SDL_Color color) {
@@ -349,12 +396,12 @@ bool Display_Init(const char *title) {
         title = "NUNO Player";
     }
 
-    const int scale = 4;
+    const int scale = SIM_WINDOW_SCALE;
     window = SDL_CreateWindow(title,
                               SDL_WINDOWPOS_CENTERED,
                               SDL_WINDOWPOS_CENTERED,
-                              DISPLAY_WIDTH * scale,
-                              SIM_TOTAL_HEIGHT * scale,
+                              SIM_CANVAS_WIDTH * scale,
+                              SIM_CANVAS_HEIGHT * scale,
                               SDL_WINDOW_SHOWN);
     if (!window) {
         fprintf(stderr, "SDL_CreateWindow Error: %s\n", SDL_GetError());
@@ -369,7 +416,7 @@ bool Display_Init(const char *title) {
         return false;
     }
 
-    SDL_RenderSetLogicalSize(renderer, DISPLAY_WIDTH, SIM_TOTAL_HEIGHT);
+    SDL_RenderSetLogicalSize(renderer, SIM_CANVAS_WIDTH, SIM_CANVAS_HEIGHT);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
@@ -396,7 +443,8 @@ void Display_Clear(void) {
     }
     beginDisplayDraw();
     SDL_SetRenderDrawColor(renderer, 242, 242, 245, 255);
-    SDL_RenderFillRect(renderer, &DISPLAY_RECT);
+    SDL_Rect fill = {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT};
+    SDL_RenderFillRect(renderer, &fill);
     endDisplayDraw();
 }
 
@@ -429,7 +477,8 @@ void Display_DrawText(const char* text, int x, int y, uint8_t color) {
             penX += 4;
             continue;
         }
-        drawGlyphClipped(glyph, penX, y, textColor, &DISPLAY_RECT);
+        SDL_Rect clip = {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT};
+        drawGlyphClipped(glyph, penX, y, textColor, &clip);
         penX += 6;
     }
     endDisplayDraw();
@@ -465,6 +514,7 @@ void Display_FillRect(int x, int y, int width, int height, uint8_t color) {
 
 void Display_RenderBackground(void) {
     renderBrushedBackground();
+    renderDisplayBezel();
 }
 
 void Display_RenderClickWheel(uint8_t activeButton) {
