@@ -90,6 +90,7 @@ static void handleMouseButtonDown(const SDL_MouseButtonEvent *buttonEvent,
                                   WheelInteraction *wheel,
                                   uint32_t currentTime) {
     (void)state;
+    (void)currentTime;
     if (buttonEvent->button != SDL_BUTTON_LEFT) {
         return;
     }

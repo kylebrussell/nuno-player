@@ -230,6 +230,20 @@ static void drawWheelText(const char *text, int x, int y, SDL_Color color) {
     }
 }
 
+static int measureWheelText(const char *text) {
+    int width = 0;
+    size_t length = strlen(text);
+    for (size_t i = 0; i < length; ++i) {
+        const GlyphPattern *glyph = findGlyph(text[i]);
+        if (!glyph) {
+            width += 4;
+        } else {
+            width += 6;
+        }
+    }
+    return width;
+}
+
 static void renderWheelBase(void) {
     SDL_Color outerLight = {220, 220, 225, 255};
     SDL_Color outerDark = {180, 180, 185, 255};
@@ -255,10 +269,35 @@ static void renderWheelBase(void) {
 
 static void renderWheelLabels(void) {
     SDL_Color textColor = {40, 40, 45, 255};
-    drawWheelText("MENU", SIM_WHEEL_CENTER_X - 20, SIM_WHEEL_CENTER_Y - SIM_WHEEL_OUTER_RADIUS + 22, textColor);
-    drawWheelText("<<", SIM_WHEEL_CENTER_X - SIM_WHEEL_OUTER_RADIUS + 18, SIM_WHEEL_CENTER_Y - 3, textColor);
-    drawWheelText(">>", SIM_WHEEL_CENTER_X + SIM_WHEEL_OUTER_RADIUS - 32, SIM_WHEEL_CENTER_Y - 3, textColor);
-    drawWheelText("PLAY", SIM_WHEEL_CENTER_X - 16, SIM_WHEEL_CENTER_Y + SIM_WHEEL_OUTER_RADIUS - 36, textColor);
+    const char *menuLabel = "MENU";
+    const char *prevLabel = "<<";
+    const char *nextLabel = ">>";
+    const char *playLabel = "PLAY";
+
+    int menuWidth = measureWheelText(menuLabel);
+    int playWidth = measureWheelText(playLabel);
+    int prevWidth = measureWheelText(prevLabel);
+    int nextWidth = measureWheelText(nextLabel);
+
+    drawWheelText(menuLabel,
+                  SIM_WHEEL_CENTER_X - menuWidth / 2,
+                  SIM_WHEEL_CENTER_Y - SIM_WHEEL_OUTER_RADIUS + 18,
+                  textColor);
+
+    drawWheelText(prevLabel,
+                  SIM_WHEEL_CENTER_X - SIM_WHEEL_OUTER_RADIUS + 10,
+                  SIM_WHEEL_CENTER_Y - 4,
+                  textColor);
+
+    drawWheelText(nextLabel,
+                  SIM_WHEEL_CENTER_X + SIM_WHEEL_OUTER_RADIUS - nextWidth - 10,
+                  SIM_WHEEL_CENTER_Y - 4,
+                  textColor);
+
+    drawWheelText(playLabel,
+                  SIM_WHEEL_CENTER_X - playWidth / 2,
+                  SIM_WHEEL_CENTER_Y + SIM_WHEEL_OUTER_RADIUS - 34,
+                  textColor);
 }
 
 static void renderWheelHighlight(uint8_t activeButton) {
