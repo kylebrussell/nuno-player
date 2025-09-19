@@ -48,20 +48,6 @@ target_include_directories(drivers PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-add_library(core_audio
-    src/core/audio/audio_pipeline.c
-    src/core/audio/audio_buffer.c
-)
-target_include_directories(core_audio PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
-)
-if(NOT BUILD_SIM)
-  target_link_libraries(core_audio PUBLIC
-      LibFLAC::FLAC
-  )
-endif()
-
 add_library(core_ui
     src/core/ui/menu_renderer.c
     src/core/ui/menu_items.c
@@ -74,18 +60,30 @@ target_include_directories(core_ui PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/ui"
 )
 
-add_library(platform
-    src/platform/i2c.c
-    src/platform/gpio.c
-    src/platform/dma.c
-)
-target_include_directories(platform PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
-)
-
 # Executable Targets
 if(NOT BUILD_SIM)
+  add_library(platform
+      src/platform/i2c.c
+      src/platform/gpio.c
+      src/platform/dma.c
+  )
+  target_include_directories(platform PUBLIC
+      "${CMAKE_CURRENT_SOURCE_DIR}/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  )
+
+  add_library(core_audio
+      src/core/audio/audio_pipeline.c
+      src/core/audio/audio_buffer.c
+  )
+  target_include_directories(core_audio PUBLIC
+      "${CMAKE_CURRENT_SOURCE_DIR}/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  )
+  target_link_libraries(core_audio PUBLIC
+      LibFLAC::FLAC
+  )
+
   add_executable(nuno-player
       src/platform/main.c
   )

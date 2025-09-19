@@ -13,7 +13,12 @@
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
 
-static const SDL_Rect DISPLAY_RECT = {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT};
+static const SDL_Rect DISPLAY_RECT = {
+    SIM_DISPLAY_MARGIN_X,
+    SIM_DISPLAY_MARGIN_Y,
+    DISPLAY_WIDTH,
+    DISPLAY_HEIGHT
+};
 
 typedef struct {
     char ch;
@@ -204,13 +209,6 @@ static void renderDisplayBezel(void) {
     SDL_SetRenderDrawColor(renderer, edgeLight.r, edgeLight.g, edgeLight.b, edgeLight.a);
     SDL_RenderDrawRect(renderer, &highlightInner);
 
-    SDL_SetRenderDrawColor(renderer, 250, 250, 253, 60);
-    SDL_RenderDrawLine(renderer, outer.x + 1, outer.y + 1, outer.x + outer.w - 2, outer.y + 1);
-    SDL_RenderDrawLine(renderer, outer.x + 1, outer.y + 1, outer.x + 1, outer.y + outer.h - 2);
-
-    SDL_SetRenderDrawColor(renderer, 120, 120, 124, 70);
-    SDL_RenderDrawLine(renderer, outer.x + outer.w - 2, outer.y + 1, outer.x + outer.w - 2, outer.y + outer.h - 2);
-    SDL_RenderDrawLine(renderer, outer.x + 1, outer.y + outer.h - 2, outer.x + outer.w - 2, outer.y + outer.h - 2);
 }
 
 static void drawCircleOutline(int cx, int cy, int radius, SDL_Color color) {
