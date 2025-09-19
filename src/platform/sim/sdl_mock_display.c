@@ -150,28 +150,28 @@ static void renderDisplayBezel(void) {
     }
 
     SDL_Rect outer = {
-        DISPLAY_RECT.x - 8,
-        DISPLAY_RECT.y - 8,
-        DISPLAY_RECT.w + 16,
-        DISPLAY_RECT.h + 16
+        DISPLAY_RECT.x - 10,
+        DISPLAY_RECT.y - 12,
+        DISPLAY_RECT.w + 20,
+        DISPLAY_RECT.h + 24
     };
     SDL_Rect mid = {
-        DISPLAY_RECT.x - 4,
-        DISPLAY_RECT.y - 4,
-        DISPLAY_RECT.w + 8,
-        DISPLAY_RECT.h + 8
+        DISPLAY_RECT.x - 5,
+        DISPLAY_RECT.y - 6,
+        DISPLAY_RECT.w + 10,
+        DISPLAY_RECT.h + 12
     };
-    SDL_Rect highlight = {
+    SDL_Rect highlightInner = {
         DISPLAY_RECT.x - 1,
         DISPLAY_RECT.y - 1,
         DISPLAY_RECT.w + 2,
         DISPLAY_RECT.h + 2
     };
 
-    SDL_Color outerColor = {170, 170, 175, 255};
-    SDL_Color midColor = {208, 208, 212, 255};
-    SDL_Color edgeDark = {130, 130, 135, 255};
-    SDL_Color edgeLight = {238, 238, 242, 255};
+    SDL_Color outerColor = {180, 182, 188, 255};
+    SDL_Color midColor = {214, 216, 222, 255};
+    SDL_Color edgeDark = {140, 140, 148, 255};
+    SDL_Color edgeLight = {244, 244, 248, 255};
 
     SDL_SetRenderDrawColor(renderer, outerColor.r, outerColor.g, outerColor.b, outerColor.a);
     SDL_RenderFillRect(renderer, &outer);
@@ -183,7 +183,15 @@ static void renderDisplayBezel(void) {
     SDL_RenderDrawRect(renderer, &mid);
 
     SDL_SetRenderDrawColor(renderer, edgeLight.r, edgeLight.g, edgeLight.b, edgeLight.a);
-    SDL_RenderDrawRect(renderer, &highlight);
+    SDL_RenderDrawRect(renderer, &highlightInner);
+
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 18);
+    SDL_RenderDrawLine(renderer, outer.x, outer.y, outer.x + outer.w - 1, outer.y);
+    SDL_RenderDrawLine(renderer, outer.x, outer.y, outer.x, outer.y + outer.h - 1);
+
+    SDL_SetRenderDrawColor(renderer, 120, 120, 124, 50);
+    SDL_RenderDrawLine(renderer, outer.x + outer.w - 1, outer.y, outer.x + outer.w - 1, outer.y + outer.h - 1);
+    SDL_RenderDrawLine(renderer, outer.x, outer.y + outer.h - 1, outer.x + outer.w - 1, outer.y + outer.h - 1);
 }
 
 static void drawCircleOutline(int cx, int cy, int radius, SDL_Color color) {
