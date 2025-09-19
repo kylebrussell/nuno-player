@@ -1,8 +1,10 @@
 #include "nuno/display.h"
+#include "ui_tasks.h"
 
 #include <SDL2/SDL.h>
 
 #include <ctype.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,6 +12,8 @@
 
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
+
+static const SDL_Rect DISPLAY_RECT = {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT};
 
 typedef struct {
     char ch;
@@ -21,10 +25,11 @@ static const GlyphPattern glyphs[] = {
     { '!', { "  X  ", "  X  ", "  X  ", "  X  ", "  X  ", "     ", "  X  " } },
     { '\'', { "  X  ", "  X  ", " X   ", "     ", "     ", "     ", "     " } },
     { ',', { "     ", "     ", "     ", "     ", "     ", "  X  ", " X   " } },
-    { '&', { " XX  ", "X  X ", "X  X ", " XX  ", "X X X", "X  X ", " XX X" } },
     { '-', { "     ", "     ", "     ", " XXX ", "     ", "     ", "     " } },
     { '.', { "     ", "     ", "     ", "     ", "     ", "  X  ", "     " } },
     { ':', { "     ", "  X  ", "     ", "     ", "     ", "  X  ", "     " } },
+    { '<', { "   X ", "  X  ", " X   ", "X    ", " X   ", "  X  ", "   X " } },
+    { '>', { " X   ", "  X  ", "   X ", "    X", "   X ", "  X  ", " X   " } },
     { '?', { " XXX ", "X   X", "    X", "   X ", "  X  ", "     ", "  X  " } },
     { '0', { " XXX ", "X   X", "X  XX", "X X X", "XX  X", "X   X", " XXX " } },
     { '1', { "  X  ", " XX  ", "  X  ", "  X  ", "  X  ", "  X  ", "XXXXX" } },
@@ -75,33 +80,221 @@ static const GlyphPattern* findGlyph(char c) {
     return NULL;
 }
 
-static void setPaletteColor(uint8_t color) {
-    if (!renderer) {
-        return;
+static inline Uint8 clamp_u8(int value) {
+    if (value < 0) {
+        return 0;
     }
-    if (color == 0) {
-        SDL_SetRenderDrawColor(renderer, 245, 245, 245, 255);
-    } else {
-        SDL_SetRenderDrawColor(renderer, 25, 25, 25, 255);
+    if (value > 255) {
+        return 255;
     }
+    return (Uint8)value;
 }
 
-static void drawGlyph(const GlyphPattern *glyph, int originX, int originY, uint8_t color) {
+static void drawGlyphClipped(const GlyphPattern *glyph, int originX, int originY, SDL_Color color, const SDL_Rect *clip) {
     if (!renderer || !glyph) {
         return;
     }
-
-    setPaletteColor(color);
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
     for (int row = 0; row < 7; ++row) {
         for (int col = 0; col < 5; ++col) {
-            if (glyph->rows[row][col] != ' ') {
-                int x = originX + col;
-                int y = originY + row;
-                if (x >= 0 && x < DISPLAY_WIDTH && y >= 0 && y < DISPLAY_HEIGHT) {
-                    SDL_RenderDrawPoint(renderer, x, y);
+            if (glyph->rows[row][col] == ' ') {
+                continue;
+            }
+            int x = originX + col;
+            int y = originY + row;
+            if (clip) {
+                if (x < clip->x || x >= clip->x + clip->w || y < clip->y || y >= clip->y + clip->h) {
+                    continue;
                 }
             }
+            SDL_RenderDrawPoint(renderer, x, y);
         }
+    }
+}
+
+static void beginDisplayDraw(void) {
+    if (renderer) {
+        SDL_RenderSetClipRect(renderer, &DISPLAY_RECT);
+    }
+}
+
+static void endDisplayDraw(void) {
+    if (renderer) {
+        SDL_RenderSetClipRect(renderer, NULL);
+    }
+}
+
+static void renderBrushedBackground(void) {
+    if (!renderer) {
+        return;
+    }
+
+    for (int y = 0; y < SIM_TOTAL_HEIGHT; ++y) {
+        float t = (float)y / (float)SIM_TOTAL_HEIGHT;
+        int base = (int)(210 - 40 * t);
+        int noise = (int)(12 * sinf((float)y * 0.35f));
+        Uint8 shade = clamp_u8(base + noise);
+        SDL_SetRenderDrawColor(renderer, shade, shade, shade + 8, 255);
+        SDL_RenderDrawLine(renderer, 0, y, DISPLAY_WIDTH, y);
+    }
+}
+
+static void drawCircleOutline(int cx, int cy, int radius, SDL_Color color) {
+    if (!renderer) {
+        return;
+    }
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
+    int x = radius;
+    int y = 0;
+    int decision = 1 - radius;
+
+    while (x >= y) {
+        SDL_RenderDrawPoint(renderer, cx + x, cy + y);
+        SDL_RenderDrawPoint(renderer, cx + y, cy + x);
+        SDL_RenderDrawPoint(renderer, cx - y, cy + x);
+        SDL_RenderDrawPoint(renderer, cx - x, cy + y);
+        SDL_RenderDrawPoint(renderer, cx - x, cy - y);
+        SDL_RenderDrawPoint(renderer, cx - y, cy - x);
+        SDL_RenderDrawPoint(renderer, cx + y, cy - x);
+        SDL_RenderDrawPoint(renderer, cx + x, cy - y);
+        y++;
+        if (decision <= 0) {
+            decision += 2 * y + 1;
+        } else {
+            x--;
+            decision += 2 * (y - x) + 1;
+        }
+    }
+}
+
+static void fillCircle(int cx, int cy, int radius, SDL_Color color) {
+    if (!renderer) {
+        return;
+    }
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
+    for (int dy = -radius; dy <= radius; ++dy) {
+        int span = (int)sqrtf((float)(radius * radius - dy * dy));
+        SDL_RenderDrawLine(renderer, cx - span, cy + dy, cx + span, cy + dy);
+    }
+}
+
+static void fillRingSegment(int cx, int cy, int innerRadius, int outerRadius, float startDeg, float endDeg, SDL_Color color) {
+    if (!renderer) {
+        return;
+    }
+
+    float startRad = startDeg * (float)M_PI / 180.0f;
+    float endRad = endDeg * (float)M_PI / 180.0f;
+    if (endRad < startRad) {
+        endRad += 2.0f * (float)M_PI;
+    }
+
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    for (int y = -outerRadius; y <= outerRadius; ++y) {
+        for (int x = -outerRadius; x <= outerRadius; ++x) {
+            float distSq = (float)(x * x + y * y);
+            if (distSq > (float)(outerRadius * outerRadius) || distSq < (float)(innerRadius * innerRadius)) {
+                continue;
+            }
+            float angle = atan2f(-(float)y, (float)x);
+            if (angle < 0.0f) {
+                angle += 2.0f * (float)M_PI;
+            }
+            float start = startRad;
+            float end = endRad;
+            if (start < 0.0f) {
+                start += 2.0f * (float)M_PI;
+                end += 2.0f * (float)M_PI;
+            }
+            if (angle < start) {
+                angle += 2.0f * (float)M_PI;
+            }
+            if (angle >= start && angle <= end) {
+                SDL_RenderDrawPoint(renderer, cx + x, cy + y);
+            }
+        }
+    }
+}
+
+static void drawWheelText(const char *text, int x, int y, SDL_Color color) {
+    int penX = x;
+    size_t length = strlen(text);
+    for (size_t i = 0; i < length; ++i) {
+        const GlyphPattern *glyph = findGlyph(text[i]);
+        if (!glyph) {
+            penX += 4;
+            continue;
+        }
+        drawGlyphClipped(glyph, penX, y, color, NULL);
+        penX += 6;
+    }
+}
+
+static void renderWheelBase(void) {
+    SDL_Color outerLight = {220, 220, 225, 255};
+    SDL_Color outerDark = {180, 180, 185, 255};
+    for (int r = SIM_WHEEL_OUTER_RADIUS; r >= SIM_WHEEL_INNER_RADIUS; --r) {
+        float t = (float)(SIM_WHEEL_OUTER_RADIUS - r) / (float)(SIM_WHEEL_OUTER_RADIUS - SIM_WHEEL_INNER_RADIUS);
+        SDL_Color color = {
+            clamp_u8((int)(outerDark.r + (outerLight.r - outerDark.r) * t)),
+            clamp_u8((int)(outerDark.g + (outerLight.g - outerDark.g) * t)),
+            clamp_u8((int)(outerDark.b + (outerLight.b - outerDark.b) * t)),
+            255
+        };
+        fillCircle(SIM_WHEEL_CENTER_X, SIM_WHEEL_CENTER_Y, r, color);
+    }
+
+    SDL_Color hubColor = {240, 240, 242, 255};
+    fillCircle(SIM_WHEEL_CENTER_X, SIM_WHEEL_CENTER_Y, SIM_WHEEL_INNER_RADIUS, hubColor);
+
+    SDL_Color outerOutline = {150, 150, 155, 255};
+    SDL_Color innerOutline = {200, 200, 205, 255};
+    drawCircleOutline(SIM_WHEEL_CENTER_X, SIM_WHEEL_CENTER_Y, SIM_WHEEL_OUTER_RADIUS, outerOutline);
+    drawCircleOutline(SIM_WHEEL_CENTER_X, SIM_WHEEL_CENTER_Y, SIM_WHEEL_INNER_RADIUS, innerOutline);
+}
+
+static void renderWheelLabels(void) {
+    SDL_Color textColor = {40, 40, 45, 255};
+    drawWheelText("MENU", SIM_WHEEL_CENTER_X - 20, SIM_WHEEL_CENTER_Y - SIM_WHEEL_OUTER_RADIUS + 22, textColor);
+    drawWheelText("<<", SIM_WHEEL_CENTER_X - SIM_WHEEL_OUTER_RADIUS + 18, SIM_WHEEL_CENTER_Y - 3, textColor);
+    drawWheelText(">>", SIM_WHEEL_CENTER_X + SIM_WHEEL_OUTER_RADIUS - 32, SIM_WHEEL_CENTER_Y - 3, textColor);
+    drawWheelText("PLAY", SIM_WHEEL_CENTER_X - 16, SIM_WHEEL_CENTER_Y + SIM_WHEEL_OUTER_RADIUS - 36, textColor);
+}
+
+static void renderWheelHighlight(uint8_t activeButton) {
+    if (activeButton == 0) {
+        return;
+    }
+
+    SDL_Color highlight = {200, 200, 205, 220};
+    switch (activeButton) {
+        case BUTTON_MENU:
+            fillRingSegment(SIM_WHEEL_CENTER_X, SIM_WHEEL_CENTER_Y,
+                            SIM_WHEEL_INNER_RADIUS + 2, SIM_WHEEL_OUTER_RADIUS - 2,
+                            45.0f, 135.0f, highlight);
+            break;
+        case BUTTON_NEXT:
+            fillRingSegment(SIM_WHEEL_CENTER_X, SIM_WHEEL_CENTER_Y,
+                            SIM_WHEEL_INNER_RADIUS + 2, SIM_WHEEL_OUTER_RADIUS - 2,
+                            315.0f, 405.0f, highlight);
+            break;
+        case BUTTON_PLAY:
+            fillRingSegment(SIM_WHEEL_CENTER_X, SIM_WHEEL_CENTER_Y,
+                            SIM_WHEEL_INNER_RADIUS + 2, SIM_WHEEL_OUTER_RADIUS - 2,
+                            225.0f, 315.0f, highlight);
+            break;
+        case BUTTON_PREV:
+            fillRingSegment(SIM_WHEEL_CENTER_X, SIM_WHEEL_CENTER_Y,
+                            SIM_WHEEL_INNER_RADIUS + 2, SIM_WHEEL_OUTER_RADIUS - 2,
+                            135.0f, 225.0f, highlight);
+            break;
+        case BUTTON_CENTER: {
+            SDL_Color centerHighlight = {210, 210, 220, 255};
+            fillCircle(SIM_WHEEL_CENTER_X, SIM_WHEEL_CENTER_Y, SIM_WHEEL_INNER_RADIUS - 2, centerHighlight);
+            break;
+        }
+        default:
+            break;
     }
 }
 
@@ -122,7 +315,7 @@ bool Display_Init(const char *title) {
                               SDL_WINDOWPOS_CENTERED,
                               SDL_WINDOWPOS_CENTERED,
                               DISPLAY_WIDTH * scale,
-                              DISPLAY_HEIGHT * scale,
+                              SIM_TOTAL_HEIGHT * scale,
                               SDL_WINDOW_SHOWN);
     if (!window) {
         fprintf(stderr, "SDL_CreateWindow Error: %s\n", SDL_GetError());
@@ -137,8 +330,9 @@ bool Display_Init(const char *title) {
         return false;
     }
 
-    SDL_RenderSetLogicalSize(renderer, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    SDL_RenderSetLogicalSize(renderer, DISPLAY_WIDTH, SIM_TOTAL_HEIGHT);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
     return true;
 }
@@ -161,22 +355,25 @@ void Display_Clear(void) {
     if (!renderer) {
         return;
     }
-    SDL_SetRenderDrawColor(renderer, 245, 245, 245, 255);
-    SDL_RenderClear(renderer);
+    beginDisplayDraw();
+    SDL_SetRenderDrawColor(renderer, 242, 242, 245, 255);
+    SDL_RenderFillRect(renderer, &DISPLAY_RECT);
+    endDisplayDraw();
 }
 
 void Display_Update(void) {
-    if (!renderer) {
-        return;
-    }
-    SDL_RenderPresent(renderer);
+    // Rendering pipeline now handled by simulator entry point.
 }
 
 void Display_DrawText(const char* text, int x, int y, uint8_t color) {
     if (!renderer || !text) {
         return;
     }
-
+    beginDisplayDraw();
+    SDL_Color textColor = (color == 0)
+        ? (SDL_Color){240, 240, 245, 255}
+        : (SDL_Color){25, 25, 25, 255};
+    const GlyphPattern *glyph;
     int penX = x;
     size_t length = strlen(text);
     for (size_t i = 0; i < length; ++i) {
@@ -188,32 +385,57 @@ void Display_DrawText(const char* text, int x, int y, uint8_t color) {
             penX += 4;
             continue;
         }
-
-        const GlyphPattern *glyph = findGlyph(c);
+        glyph = findGlyph(c);
         if (!glyph) {
             penX += 4;
             continue;
         }
-
-        drawGlyph(glyph, penX, y, color);
+        drawGlyphClipped(glyph, penX, y, textColor, &DISPLAY_RECT);
         penX += 6;
     }
+    endDisplayDraw();
 }
 
 void Display_DrawRect(int x, int y, int width, int height, uint8_t color) {
     if (!renderer) {
         return;
     }
+    beginDisplayDraw();
     SDL_Rect r = { x, y, width, height };
-    setPaletteColor(color);
+    SDL_Color c = (color == 0)
+        ? (SDL_Color){240, 240, 245, 255}
+        : (SDL_Color){30, 30, 35, 255};
+    SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, c.a);
     SDL_RenderDrawRect(renderer, &r);
+    endDisplayDraw();
 }
 
 void Display_FillRect(int x, int y, int width, int height, uint8_t color) {
     if (!renderer) {
         return;
     }
+    beginDisplayDraw();
     SDL_Rect r = { x, y, width, height };
-    setPaletteColor(color);
+    SDL_Color c = (color == 0)
+        ? (SDL_Color){240, 240, 245, 255}
+        : (SDL_Color){35, 35, 40, 255};
+    SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, c.a);
     SDL_RenderFillRect(renderer, &r);
+    endDisplayDraw();
+}
+
+void Display_RenderBackground(void) {
+    renderBrushedBackground();
+}
+
+void Display_RenderClickWheel(uint8_t activeButton) {
+    renderWheelBase();
+    renderWheelHighlight(activeButton);
+    renderWheelLabels();
+}
+
+void Display_Present(void) {
+    if (renderer) {
+        SDL_RenderPresent(renderer);
+    }
 }
