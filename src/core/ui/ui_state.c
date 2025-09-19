@@ -66,7 +66,8 @@ void scrollDown(UIState *state) {
         state->currentMenu.selectedIndex++;
     }
 
-    uint8_t bottomVisible = state->currentMenu.scrollOffset + (DISPLAY_HEIGHT / ITEM_HEIGHT) - 1;
+    uint8_t visibleSlots = (DISPLAY_HEIGHT - TITLE_BAR_HEIGHT) / ITEM_HEIGHT;
+    uint8_t bottomVisible = state->currentMenu.scrollOffset + (visibleSlots ? visibleSlots : 1) - 1;
     if (state->currentMenu.selectedIndex > bottomVisible) {
         state->currentMenu.scrollOffset = state->currentMenu.selectedIndex - (DISPLAY_HEIGHT / ITEM_HEIGHT) + 1;
     }

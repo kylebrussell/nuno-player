@@ -81,9 +81,9 @@ void MenuRenderer_StartTransition(MenuType from, MenuType to, uint32_t currentTi
 }
 
 static void renderMenuItem(const MenuItem* item, uint8_t index, bool selected) {
-    int y = (index * ITEM_HEIGHT) - (int)scrollState.currentScrollOffset;
+    int y = TITLE_BAR_HEIGHT + (index * ITEM_HEIGHT) - (int)scrollState.currentScrollOffset;
 
-    if (y < -ITEM_HEIGHT || y > DISPLAY_HEIGHT) {
+    if ((y + ITEM_HEIGHT) <= TITLE_BAR_HEIGHT || y >= DISPLAY_HEIGHT) {
         return;
     }
 
@@ -165,12 +165,13 @@ void MenuRenderer_Render(const UIState* state, uint32_t currentTime) {
     updateScrollAnimation(currentTime);
 
     Display_Clear();
-    Display_DrawText(state->currentMenu.title, TEXT_MARGIN, 0, TITLE_TEXT_COLOR);
-
     for (int i = 0; i < state->currentMenu.itemCount; ++i) {
         renderMenuItem(&state->currentMenu.items[i], i,
                        i == state->currentMenu.selectedIndex);
     }
+
+    Display_FillRect(0, 0, DISPLAY_WIDTH, TITLE_BAR_HEIGHT, 0);
+    Display_DrawText(state->currentMenu.title, TEXT_MARGIN, 2, TITLE_TEXT_COLOR);
 
     if (state->currentMenuType == MENU_NOW_PLAYING && state->isPlaying) {
         renderProgressBar(state->currentTrackTime, state->totalTrackTime);

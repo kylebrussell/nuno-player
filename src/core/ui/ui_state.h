@@ -14,6 +14,7 @@
 #define ITEM_HEIGHT 16
 #define TEXT_HEIGHT 12
 #define TEXT_MARGIN 4
+#define TITLE_BAR_HEIGHT 16
 
 // Colors (for monochrome display these translate to different patterns)
 #define NORMAL_TEXT_COLOR 1
