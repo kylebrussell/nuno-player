@@ -151,14 +151,78 @@ static void renderBrushedBackground(void) {
         return;
     }
 
+    // SNES-era pixel-art take: 6-color silver palette + ordered dithering
+    const SDL_Color palette[6] = {
+        {235, 236, 242, 255}, // lightest
+        {220, 222, 230, 255},
+        {204, 206, 214, 255},
+        {188, 190, 198, 255},
+        {168, 170, 178, 255},
+        {148, 150, 158, 255}  // darkest
+    };
+
+    static const uint8_t BAYER4[4][4] = {
+        { 0,  8,  2, 10},
+        {12,  4, 14,  6},
+        { 3, 11,  1,  9},
+        {15,  7, 13,  5}
+    };
+
     for (int y = 0; y < SIM_CANVAS_HEIGHT; ++y) {
-        float t = (float)y / (float)SIM_CANVAS_HEIGHT;
-        int base = (int)(205 - 35 * t);
-        int noise = (int)(12 * sinf((float)y * 0.35f));
-        Uint8 shade = clamp_u8(base + noise);
-        SDL_SetRenderDrawColor(renderer, shade, shade, shade + 6, 255);
-        SDL_RenderDrawLine(renderer, 0, y, SIM_CANVAS_WIDTH, y);
+        float gy = (SIM_CANVAS_HEIGHT <= 1) ? 0.0f : (float)y / (float)(SIM_CANVAS_HEIGHT - 1);
+        float shade = gy; // vertical gradient
+
+        // Edge vignette in palette space (darker near borders)
+        float edge = 0.0f;
+        int m = (y < 24) ? (24 - y) : (y > (SIM_CANVAS_HEIGHT - 25) ? (y - (SIM_CANVAS_HEIGHT - 25)) : 0);
+        if (m > 0) edge = (float)m / 24.0f * 0.12f;
+
+        for (int x = 0; x < SIM_CANVAS_WIDTH; ++x) {
+            float gx = (SIM_CANVAS_WIDTH <= 1) ? 0.0f : (float)x / (float)(SIM_CANVAS_WIDTH - 1);
+            float curve = 0.10f * (0.5f - gx) * (0.5f - gx); // slight horizontal curvature
+
+            float v = shade + curve + edge;
+            if (v < 0.0f) v = 0.0f; if (v > 1.0f) v = 1.0f;
+
+            float scaled = v * (float)(5); // 0..5 base index
+            int idx = (int)scaled;
+            float frac = scaled - (float)idx;
+
+            // Ordered dithering between idx and idx+1
+            float threshold = ((float)BAYER4[y & 3][x & 3] + 0.5f) / 16.0f;
+            int finalIdx = idx + (frac > threshold ? 1 : 0);
+            if (finalIdx < 0) finalIdx = 0; if (finalIdx > 5) finalIdx = 5;
+
+            // Fake scanline vibe: darken odd rows slightly
+            SDL_Color c = palette[finalIdx];
+            if ((y & 1) == 1) {
+                c.r = clamp_u8((int)c.r - 3);
+                c.g = clamp_u8((int)c.g - 3);
+                c.b = clamp_u8((int)c.b - 3);
+            }
+
+            SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, 255);
+            SDL_RenderDrawPoint(renderer, x, y);
+        }
     }
+
+    // Pixel-art bevel around the display (chunkier than before)
+    SDL_SetRenderDrawColor(renderer, 140, 140, 148, 255);
+    SDL_Rect mid = {
+        DISPLAY_RECT.x - 5,
+        DISPLAY_RECT.y - 6,
+        DISPLAY_RECT.w + 10,
+        DISPLAY_RECT.h + 12
+    };
+    SDL_RenderDrawRect(renderer, &mid);
+    SDL_SetRenderDrawColor(renderer, 244, 244, 248, 255);
+    SDL_Rect inner = {
+        DISPLAY_RECT.x - 1,
+        DISPLAY_RECT.y - 1,
+        DISPLAY_RECT.w + 2,
+        DISPLAY_RECT.h + 2
+    };
+    SDL_RenderDrawRect(renderer, &inner);
 }
 
 static void renderDisplayBezel(void) {

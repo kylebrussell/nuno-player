@@ -179,7 +179,7 @@ static void populateMenu(UIState *state, MenuType type) {
 
     switch (type) {
         case MENU_MAIN:
-            title = "iPod";
+            title = "NUNO";
             state->currentMenu.itemCount = NUM_MAIN_MENU_ITEMS;
             for (uint8_t i = 0; i < state->currentMenu.itemCount; ++i) {
                 strncpy(state->currentMenu.items[i].text, MAIN_MENU_ITEMS[i], MAX_ITEM_LENGTH - 1);
