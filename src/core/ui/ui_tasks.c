@@ -150,14 +150,23 @@ void updatePlaybackInfo(UIState* state,
         return;
     }
 
+    bool timeChanged = (state->currentTrackTime != currentTime);
+    bool playStateChanged = (state->isPlaying != isPlaying);
+
     state->currentTrackTime = currentTime;
     state->totalTrackTime = totalTime ? totalTime : state->totalTrackTime;
     state->isPlaying = isPlaying;
+
+    // Refresh Now Playing view if displaying and something changed
+    if ((timeChanged || playStateChanged) && state->currentMenuType == MENU_NOW_PLAYING) {
+        refreshNowPlayingView(state);
+    }
 }
 
 void updateTrackInfo(UIState* state,
                      const char* trackTitle,
-                     const char* artistName) {
+                     const char* artistName,
+                     const char* albumName) {
     if (!state) {
         return;
     }
@@ -171,13 +180,30 @@ void updateTrackInfo(UIState* state,
         strncpy(state->currentArtist, artistName, MAX_TITLE_LENGTH - 1);
         state->currentArtist[MAX_TITLE_LENGTH - 1] = '\0';
     }
+
+    if (albumName) {
+        strncpy(state->currentAlbum, albumName, MAX_TITLE_LENGTH - 1);
+        state->currentAlbum[MAX_TITLE_LENGTH - 1] = '\0';
+    }
+
+    // Refresh Now Playing view if currently displayed
+    if (state->currentMenuType == MENU_NOW_PLAYING) {
+        refreshNowPlayingView(state);
+    }
 }
 
 void updateVolume(UIState* state, uint8_t volume) {
     if (!state) {
         return;
     }
+
+    bool volumeChanged = (state->volume != volume);
     state->volume = volume;
+
+    // Refresh Now Playing view if displaying and volume changed
+    if (volumeChanged && state->currentMenuType == MENU_NOW_PLAYING) {
+        refreshNowPlayingView(state);
+    }
 }
 
 void handleRotation(UIState* state, int8_t direction, uint32_t currentTime) {

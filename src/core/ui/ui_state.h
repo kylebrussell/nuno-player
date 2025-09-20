@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "nuno/display.h"
 
@@ -29,7 +30,8 @@ typedef enum {
     MENU_PHOTOS,     // Added
     MENU_GAMES,      // Added
     MENU_SETTINGS,
-    MENU_NOW_PLAYING
+    MENU_NOW_PLAYING,
+    MENU_SONGS
 } MenuType;
 
 typedef struct MenuItem {
@@ -46,6 +48,8 @@ typedef struct Menu {
     uint8_t scrollOffset;  // For scrolling when more items than can fit on screen
 } Menu;
 
+typedef bool (*PlayTrackHandler)(void *context, size_t track_index);
+
 typedef struct UIState {
     Menu currentMenu;
     MenuType currentMenuType;
@@ -56,8 +60,11 @@ typedef struct UIState {
     uint16_t totalTrackTime;    // in seconds
     char currentTrackTitle[MAX_TITLE_LENGTH];
     char currentArtist[MAX_TITLE_LENGTH];
+    char currentAlbum[MAX_TITLE_LENGTH];
     MenuType navigationStack[8];
     uint8_t navigationDepth;
+    PlayTrackHandler playTrackHandler;
+    void *playTrackContext;
 } UIState;
 
 // Menu navigation functions
@@ -67,5 +74,9 @@ void scrollUp(UIState* state);
 void scrollDown(UIState* state);
 void goBack(UIState* state);
 void navigateToMenu(UIState* state, MenuType menuType);
+void UIState_SetPlaybackHandler(UIState *state,
+                                PlayTrackHandler handler,
+                                void *context);
+void refreshNowPlayingView(UIState* state);
 
 #endif /* UI_STATE_H */

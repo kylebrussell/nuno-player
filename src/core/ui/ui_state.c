@@ -1,7 +1,10 @@
 #include "ui_state.h"
 #include "menu_items.h"
 
+#include "nuno/music_catalog.h"
+
 #include <string.h>
+#include <stdio.h>
 
 typedef struct {
     const char *title;
@@ -12,6 +15,17 @@ typedef struct {
 static void populateMenu(UIState *state, MenuType type);
 static void pushMenu(UIState *state, MenuType type);
 
+void UIState_SetPlaybackHandler(UIState *state,
+                                PlayTrackHandler handler,
+                                void *context) {
+    if (!state) {
+        return;
+    }
+
+    state->playTrackHandler = handler;
+    state->playTrackContext = context;
+}
+
 void initUIState(UIState *state) {
     if (!state) {
         return;
@@ -21,10 +35,20 @@ void initUIState(UIState *state) {
     state->batteryLevel = 85;
     state->volume = 50;
     state->totalTrackTime = 300;
-    strncpy(state->currentTrackTitle, "Now Playing", MAX_TITLE_LENGTH - 1);
-    strncpy(state->currentArtist, "Artist", MAX_TITLE_LENGTH - 1);
+    if (g_music_library_track_count > 0U) {
+        const MusicLibraryTrack *initialTrack = &g_music_library_tracks[0];
+        strncpy(state->currentTrackTitle, initialTrack->title, MAX_TITLE_LENGTH - 1);
+        strncpy(state->currentArtist, initialTrack->artist, MAX_TITLE_LENGTH - 1);
+        strncpy(state->currentAlbum, initialTrack->album, MAX_TITLE_LENGTH - 1);
+    } else {
+        strncpy(state->currentTrackTitle, "Now Playing", MAX_TITLE_LENGTH - 1);
+        strncpy(state->currentArtist, "Artist", MAX_TITLE_LENGTH - 1);
+        state->currentAlbum[0] = '\0';
+    }
 
     state->navigationDepth = 0;
+    state->playTrackHandler = NULL;
+    state->playTrackContext = NULL;
     pushMenu(state, MENU_MAIN);
 }
 
@@ -38,8 +62,31 @@ void selectMenuItem(UIState *state) {
         return;
     }
 
+    bool playback_started = false;
+
+    if (state->currentMenuType == MENU_SONGS) {
+        size_t selectedIndex = state->currentMenu.selectedIndex;
+        if (selectedIndex < g_music_library_track_count) {
+            const MusicLibraryTrack *track = &g_music_library_tracks[selectedIndex];
+            strncpy(state->currentTrackTitle, track->title, MAX_TITLE_LENGTH - 1);
+            state->currentTrackTitle[MAX_TITLE_LENGTH - 1] = '\0';
+            strncpy(state->currentArtist, track->artist, MAX_TITLE_LENGTH - 1);
+            state->currentArtist[MAX_TITLE_LENGTH - 1] = '\0';
+            strncpy(state->currentAlbum, track->album, MAX_TITLE_LENGTH - 1);
+            state->currentAlbum[MAX_TITLE_LENGTH - 1] = '\0';
+        }
+
+        if (state->playTrackHandler) {
+            playback_started = state->playTrackHandler(state->playTrackContext, selectedIndex);
+        }
+    }
+
     if (item->submenu != state->currentMenuType) {
         pushMenu(state, item->submenu);
+    }
+
+    if (playback_started) {
+        state->isPlaying = true;
     }
 }
 
@@ -137,8 +184,9 @@ static void populateMenu(UIState *state, MenuType type) {
             for (uint8_t i = 0; i < state->currentMenu.itemCount; ++i) {
                 strncpy(state->currentMenu.items[i].text, MUSIC_MENU_ITEMS[i], MAX_ITEM_LENGTH - 1);
                 state->currentMenu.items[i].text[MAX_ITEM_LENGTH - 1] = '\0';
-                state->currentMenu.items[i].selectable = true;
-                state->currentMenu.items[i].submenu = MENU_NOW_PLAYING;
+                bool isSongs = (i == 3U);
+                state->currentMenu.items[i].selectable = isSongs && (g_music_library_track_count > 0U);
+                state->currentMenu.items[i].submenu = isSongs ? MENU_SONGS : MENU_MUSIC;
             }
             break;
         case MENU_SETTINGS:
@@ -166,13 +214,74 @@ static void populateMenu(UIState *state, MenuType type) {
             break;
         case MENU_NOW_PLAYING:
             title = "Now Playing";
-            state->currentMenu.itemCount = 3;
+            state->currentMenu.itemCount = 6;
+
+            // Track title
             strncpy(state->currentMenu.items[0].text, state->currentTrackTitle, MAX_ITEM_LENGTH - 1);
+            state->currentMenu.items[0].text[MAX_ITEM_LENGTH - 1] = '\0';
+            state->currentMenu.items[0].selectable = false;
+            state->currentMenu.items[0].submenu = MENU_NOW_PLAYING;
+
+            // Artist name
             strncpy(state->currentMenu.items[1].text, state->currentArtist, MAX_ITEM_LENGTH - 1);
-            strncpy(state->currentMenu.items[2].text, "Press Menu to go back", MAX_ITEM_LENGTH - 1);
+            state->currentMenu.items[1].text[MAX_ITEM_LENGTH - 1] = '\0';
+            state->currentMenu.items[1].selectable = false;
+            state->currentMenu.items[1].submenu = MENU_NOW_PLAYING;
+
+            // Time display (current/total)
+            uint16_t currentMin = state->currentTrackTime / 60;
+            uint16_t currentSec = state->currentTrackTime % 60;
+            uint16_t totalMin = state->totalTrackTime / 60;
+            uint16_t totalSec = state->totalTrackTime % 60;
+            snprintf(state->currentMenu.items[2].text, MAX_ITEM_LENGTH,
+                    "%02u:%02u / %02u:%02u", currentMin, currentSec, totalMin, totalSec);
+            state->currentMenu.items[2].selectable = false;
+            state->currentMenu.items[2].submenu = MENU_NOW_PLAYING;
+
+            // Play/Pause status
+            strncpy(state->currentMenu.items[3].text,
+                   state->isPlaying ? "Playing" : "Paused", MAX_ITEM_LENGTH - 1);
+            state->currentMenu.items[3].text[MAX_ITEM_LENGTH - 1] = '\0';
+            state->currentMenu.items[3].selectable = false;
+            state->currentMenu.items[3].submenu = MENU_NOW_PLAYING;
+
+            // Volume display
+            snprintf(state->currentMenu.items[4].text, MAX_ITEM_LENGTH,
+                    "Volume: %u%%", state->volume);
+            state->currentMenu.items[4].selectable = false;
+            state->currentMenu.items[4].submenu = MENU_NOW_PLAYING;
+
+            // Instructions
+            strncpy(state->currentMenu.items[5].text, "Menu=Back  Play=Pause", MAX_ITEM_LENGTH - 1);
+            state->currentMenu.items[5].text[MAX_ITEM_LENGTH - 1] = '\0';
+            state->currentMenu.items[5].selectable = false;
+            state->currentMenu.items[5].submenu = MENU_NOW_PLAYING;
+            break;
+        case MENU_SONGS:
+            title = "Songs";
+            if (g_music_library_track_count == 0U) {
+                state->currentMenu.itemCount = 1U;
+                strncpy(state->currentMenu.items[0].text,
+                        "No tracks found",
+                        MAX_ITEM_LENGTH - 1);
+                state->currentMenu.items[0].text[MAX_ITEM_LENGTH - 1] = '\0';
+                state->currentMenu.items[0].selectable = false;
+                state->currentMenu.items[0].submenu = MENU_SONGS;
+                break;
+            }
+
+            size_t trackCount = g_music_library_track_count;
+            if (trackCount > MAX_MENU_ITEMS) {
+                trackCount = MAX_MENU_ITEMS;
+            }
+
+            state->currentMenu.itemCount = (uint8_t)trackCount;
             for (uint8_t i = 0; i < state->currentMenu.itemCount; ++i) {
+                const MusicLibraryTrack *track = &g_music_library_tracks[i];
+                const char *titleText = (track && track->title) ? track->title : "Unknown";
+                strncpy(state->currentMenu.items[i].text, titleText, MAX_ITEM_LENGTH - 1);
                 state->currentMenu.items[i].text[MAX_ITEM_LENGTH - 1] = '\0';
-                state->currentMenu.items[i].selectable = false;
+                state->currentMenu.items[i].selectable = true;
                 state->currentMenu.items[i].submenu = MENU_NOW_PLAYING;
             }
             break;
@@ -180,4 +289,13 @@ static void populateMenu(UIState *state, MenuType type) {
 
     strncpy(state->currentMenu.title, title, MAX_TITLE_LENGTH - 1);
     state->currentMenu.title[MAX_TITLE_LENGTH - 1] = '\0';
+}
+
+void refreshNowPlayingView(UIState* state) {
+    if (!state || state->currentMenuType != MENU_NOW_PLAYING) {
+        return;
+    }
+
+    // Refresh the Now Playing menu without changing navigation
+    populateMenu(state, MENU_NOW_PLAYING);
 }
