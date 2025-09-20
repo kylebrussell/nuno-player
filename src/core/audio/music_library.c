@@ -127,6 +127,33 @@ bool MusicLibrary_OpenNextTrack(void) {
     return MusicLibrary_OpenTrack(next_index);
 }
 
+bool MusicLibrary_OpenPreviousTrack(void) {
+    if (!g_library.initialised) {
+        return false;
+    }
+
+    if (g_library.current_index == (size_t)-1) {
+        return false;
+    }
+
+    size_t prev_index = (g_library.current_index == 0U)
+        ? (size_t)-1
+        : (g_library.current_index - 1U);
+
+    if (prev_index == (size_t)-1) {
+        return false; // no previous track before 0
+    }
+
+    return MusicLibrary_OpenTrack(prev_index);
+}
+
+bool MusicLibrary_HasPreviousTrack(void) {
+    if (!g_library.initialised || g_library.current_index == (size_t)-1) {
+        return false;
+    }
+    return g_library.current_index > 0U;
+}
+
 bool MusicLibrary_HasNextTrack(void) {
     if (!g_library.initialised || g_library.current_index == (size_t)-1) {
         return g_music_library_track_count > 0U;

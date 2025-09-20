@@ -52,6 +52,7 @@ bool AudioPipeline_Stop(void);
  * @return true if skip initiated successfully, false otherwise
  */
 bool AudioPipeline_Skip(void);
+bool AudioPipeline_Previous(void);
 
 bool AudioPipeline_PlayTrack(size_t track_index);
 

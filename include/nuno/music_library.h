@@ -19,6 +19,8 @@ size_t MusicLibrary_GetCurrentIndex(void);
 bool MusicLibrary_OpenTrack(size_t index);
 bool MusicLibrary_OpenNextTrack(void);
 bool MusicLibrary_HasNextTrack(void);
+bool MusicLibrary_OpenPreviousTrack(void);
+bool MusicLibrary_HasPreviousTrack(void);
 size_t MusicLibrary_GetRemainingTracks(void);
 
 #endif /* NUNO_MUSIC_LIBRARY_H */

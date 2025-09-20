@@ -116,6 +116,9 @@ bool AudioPipeline_Play(void) {
         return false;
     }
 
+    // Ensure audio streaming is (re)started when transitioning to PLAYING
+    (void)DMA_StartTransfer(AudioBuffer_GetBuffer(), AUDIO_BUFFER_SIZE);
+
     set_state(PIPELINE_STATE_PLAYING);
     return true;
 }
@@ -164,6 +167,23 @@ bool AudioPipeline_Skip(void) {
     }
 
     g_pipeline.end_of_playlist = false;
+    return ensure_buffer_ready();
+}
+
+bool AudioPipeline_Previous(void) {
+    g_pipeline.transition_pending = true;
+
+    if (!MusicLibrary_OpenPreviousTrack()) {
+        g_pipeline.transition_pending = false;
+        return false;
+    }
+
+    update_next_track_status();
+
+    if (!AudioBuffer_Flush(false)) {
+        return false;
+    }
+
     return ensure_buffer_ready();
 }
 

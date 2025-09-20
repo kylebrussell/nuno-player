@@ -2,6 +2,11 @@
 #include "ui_state.h"
 #include "menu_renderer.h"
 
+#include "nuno/audio_pipeline.h"
+#include "nuno/music_library.h"
+#include "nuno/audio_buffer.h"
+#include "nuno/dma.h"
+
 #include <string.h>
 
 typedef enum {
@@ -71,20 +76,49 @@ static bool applyButtonEvent(UIState *state, uint8_t button) {
                       (state->navigationDepth != previousDepth);
             break;
         }
-        case BUTTON_PLAY:
-            state->isPlaying = !state->isPlaying;
-            changed = true;
+        case BUTTON_PLAY: {
+            PipelineState pipelineState = AudioPipeline_GetState();
+            if (pipelineState == PIPELINE_STATE_PLAYING) {
+                if (AudioPipeline_Pause()) {
+                    state->isPlaying = false;
+                    changed = true;
+                }
+            } else {
+                if (AudioPipeline_Play()) {
+                    state->isPlaying = true;
+                    changed = true;
+                }
+            }
             break;
+        }
         case BUTTON_NEXT: {
+            bool skipped = AudioPipeline_Skip();
+            if (skipped) {
+                const MusicLibraryTrack *track = MusicLibrary_GetCurrentTrack();
+                if (track) {
+                    updateTrackInfo(state, track->title, track->artist, track->album);
+                }
+                state->isPlaying = (AudioPipeline_GetState() == PIPELINE_STATE_PLAYING);
+            }
             MenuType previousMenu = state->currentMenuType;
             navigateToMenu(state, MENU_NOW_PLAYING);
-            changed = (state->currentMenuType != previousMenu);
+            changed = true;
+            (void)previousMenu;
             break;
         }
         case BUTTON_PREV: {
+            bool went_prev = AudioPipeline_Previous();
+            if (went_prev) {
+                const MusicLibraryTrack *track = MusicLibrary_GetCurrentTrack();
+                if (track) {
+                    updateTrackInfo(state, track->title, track->artist, track->album);
+                }
+                state->isPlaying = (AudioPipeline_GetState() == PIPELINE_STATE_PLAYING);
+            }
             MenuType previousMenu = state->currentMenuType;
-            navigateToMenu(state, MENU_MAIN);
-            changed = (state->currentMenuType != previousMenu);
+            navigateToMenu(state, MENU_NOW_PLAYING);
+            changed = true;
+            (void)previousMenu;
             break;
         }
         default:
