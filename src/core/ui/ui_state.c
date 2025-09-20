@@ -53,21 +53,31 @@ void initUIState(UIState *state) {
 }
 
 void selectMenuItem(UIState *state) {
+    printf("selectMenuItem called, menuType=%d, selectedIndex=%d\n",
+           state->currentMenuType, state->currentMenu.selectedIndex);
+
     if (!state || state->currentMenu.itemCount == 0) {
+        printf("Early return: invalid state or empty menu\n");
         return;
     }
 
     MenuItem *item = &state->currentMenu.items[state->currentMenu.selectedIndex];
     if (!item->selectable) {
+        printf("Item not selectable\n");
         return;
     }
 
     bool playback_started = false;
 
     if (state->currentMenuType == MENU_SONGS) {
+        printf("In MENU_SONGS, selectedIndex=%d, track_count=%zu\n",
+               state->currentMenu.selectedIndex, g_music_library_track_count);
+
         size_t selectedIndex = state->currentMenu.selectedIndex;
         if (selectedIndex < g_music_library_track_count) {
             const MusicLibraryTrack *track = &g_music_library_tracks[selectedIndex];
+            printf("Selected track: %s by %s\n", track->title, track->artist);
+
             strncpy(state->currentTrackTitle, track->title, MAX_TITLE_LENGTH - 1);
             state->currentTrackTitle[MAX_TITLE_LENGTH - 1] = '\0';
             strncpy(state->currentArtist, track->artist, MAX_TITLE_LENGTH - 1);
@@ -77,8 +87,14 @@ void selectMenuItem(UIState *state) {
         }
 
         if (state->playTrackHandler) {
+            printf("Calling playTrackHandler with index %zu\n", selectedIndex);
             playback_started = state->playTrackHandler(state->playTrackContext, selectedIndex);
+            printf("Playback started: %s\n", playback_started ? "YES" : "NO");
+        } else {
+            printf("No playTrackHandler set\n");
         }
+    } else {
+        printf("Not in MENU_SONGS, menuType=%d\n", state->currentMenuType);
     }
 
     if (item->submenu != state->currentMenuType) {

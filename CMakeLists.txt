@@ -48,6 +48,36 @@ target_include_directories(drivers PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
+add_library(music_catalog
+    src/core/audio/music_catalog.c
+)
+target_include_directories(music_catalog PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+add_library(core_audio
+    src/core/audio/audio_pipeline.c
+    src/core/audio/audio_buffer.c
+    src/core/audio/music_library.c
+    src/core/audio/format_decoder.c
+)
+target_include_directories(core_audio PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/external/minimp3"
+)
+target_compile_definitions(core_audio PUBLIC MINIMP3_IMPLEMENTATION)
+target_link_libraries(core_audio PUBLIC
+    music_catalog
+    drivers
+)
+if(NOT BUILD_SIM)
+  target_link_libraries(core_audio PUBLIC
+      LibFLAC::FLAC
+  )
+endif()
+
 add_library(core_ui
     src/core/ui/menu_renderer.c
     src/core/ui/menu_items.c
@@ -59,6 +89,7 @@ target_include_directories(core_ui PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/ui"
 )
+target_link_libraries(core_ui PUBLIC music_catalog)
 
 # Executable Targets
 if(NOT BUILD_SIM)
@@ -70,18 +101,6 @@ if(NOT BUILD_SIM)
   target_include_directories(platform PUBLIC
       "${CMAKE_CURRENT_SOURCE_DIR}/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/src"
-  )
-
-  add_library(core_audio
-      src/core/audio/audio_pipeline.c
-      src/core/audio/audio_buffer.c
-  )
-  target_include_directories(core_audio PUBLIC
-      "${CMAKE_CURRENT_SOURCE_DIR}/include"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src"
-  )
-  target_link_libraries(core_audio PUBLIC
-      LibFLAC::FLAC
   )
 
   add_executable(nuno-player
@@ -103,9 +122,15 @@ endif()
 
 if(BUILD_SIM)
   add_compile_definitions(BUILD_SIM)
+  # Point default library path to absolute assets dir at build time for sim
+  target_compile_definitions(core_audio PUBLIC NUNO_DEFAULT_LIBRARY_PATH="${CMAKE_CURRENT_SOURCE_DIR}/assets/music")
+  target_compile_definitions(music_catalog PUBLIC NUNO_DEFAULT_LIBRARY_PATH="${CMAKE_CURRENT_SOURCE_DIR}/assets/music")
   add_executable(nuno-sim
       src/platform/sim/main_ui_test.c
       src/platform/sim/sdl_mock_display.c
+      src/platform/sim/platform_sim.c
+      src/platform/sim/audio_controller.c
+      src/platform/sim/filesystem_sim.c
   )
   target_include_directories(nuno-sim PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -113,7 +138,10 @@ if(BUILD_SIM)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/core/ui"
   )
   target_link_libraries(nuno-sim
+      core_audio
       core_ui
+      music_catalog
+      drivers
       SDL2::SDL2
   )
   if (TARGET SDL2::SDL2main)

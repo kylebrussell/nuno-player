@@ -6,6 +6,7 @@
 // DMA Handle
 DMA_HandleTypeDef hdma_audio;
 volatile bool dma_transfer_complete = false;
+static bool dma_active = false;
 
 // Initialize DMA for audio streaming
 bool DMA_Init(void) {
@@ -53,6 +54,7 @@ bool DMA_StartTransfer(void *data, size_t len) {
         return false;
     }
 
+    dma_active = true;
     return true;
 }
 
@@ -76,6 +78,25 @@ void HAL_DMA_TxHalfCpltCallback(DMA_HandleTypeDef *hdma) {
         // Notify audio buffer that half of the DMA buffer has been transferred
         AudioBuffer_HalfDone();
     }
+}
+
+void DMA_StopTransfer(void) {
+    if (!dma_active) {
+        return;
+    }
+
+    HAL_DMA_Abort(&hdma_audio);
+    __HAL_DMA_DISABLE_IT(&hdma_audio, DMA_IT_TC | DMA_IT_HT);
+    dma_transfer_complete = false;
+    dma_active = false;
+}
+
+void DMA_PauseTransfer(void) {
+    if (!dma_active) {
+        return;
+    }
+
+    __HAL_DMA_DISABLE(&hdma_audio);
 }
 
 // Start Audio Streaming

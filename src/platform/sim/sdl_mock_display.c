@@ -411,7 +411,7 @@ static void renderWheelHighlight(uint8_t activeButton) {
 
 bool Display_Init(const char *title) {
     if (SDL_WasInit(SDL_INIT_VIDEO) == 0) {
-        if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
             fprintf(stderr, "SDL_Init Error: %s\n", SDL_GetError());
             return false;
         }

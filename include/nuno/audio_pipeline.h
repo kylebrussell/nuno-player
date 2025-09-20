@@ -53,6 +53,8 @@ bool AudioPipeline_Stop(void);
  */
 bool AudioPipeline_Skip(void);
 
+bool AudioPipeline_PlayTrack(size_t track_index);
+
 /**
  * @brief Set audio volume
  * @param volume Volume level (0-100)
@@ -168,5 +170,9 @@ void AudioPipeline_ResetEndOfPlaylistFlag(void);
  * @return true if the end of playlist has been reached, false otherwise
  */
 bool AudioPipeline_IsEndOfPlaylistReached(void);
+
+void AudioPipeline_SynchronizeState(void);
+void AudioPipeline_NotifyTransitionComplete(void);
+void AudioPipeline_NotifyCrossfadeComplete(void);
 
 #endif /* AUDIO_PIPELINE_H */

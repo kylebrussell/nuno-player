@@ -2,6 +2,11 @@
 #include "ui_state.h"
 #include "ui_tasks.h"
 #include "nuno/display.h"
+#include "platform/sim/audio_controller.h"
+
+#include "nuno/audio_pipeline.h"
+#include "nuno/audio_buffer.h"
+#include "nuno/format_decoder.h"
 
 #include <SDL2/SDL.h>
 
@@ -214,8 +219,18 @@ int main(void) {
         return 1;
     }
 
+    bool audio_ready = SimAudio_Init();
+    printf("Audio initialization: %s\n", audio_ready ? "SUCCESS" : "FAILED");
+
     UIState uiState;
     initUIState(&uiState);
+
+    if (audio_ready) {
+        UIState_SetPlaybackHandler(&uiState, SimAudio_PlayTrack, NULL);
+        printf("Playback handler set\n");
+    } else {
+        printf("No playback handler set due to audio init failure\n");
+    }
 
     bool running = true;
     SDL_Event event;
@@ -258,6 +273,21 @@ int main(void) {
         }
 
         processUIEvents(&uiState, currentTime);
+
+        // Update playback time/progress once per frame
+        {
+            bool isPlaying = (AudioPipeline_GetState() == PIPELINE_STATE_PLAYING);
+            AudioBufferStats stats = {0};
+            AudioBuffer_GetBufferStats(&stats);
+            FormatDecoder *dec = AudioBuffer_GetDecoder();
+            uint32_t sr = dec ? format_decoder_get_sample_rate(dec) : 0U;
+            uint16_t seconds = 0;
+            if (sr > 0U) {
+                seconds = (uint16_t)(stats.total_samples / sr);
+            }
+            // Pass totalTime as 0 to keep existing value in UI
+            updatePlaybackInfo(&uiState, seconds, 0, isPlaying);
+        }
         Display_RenderBackground();
         MenuRenderer_Render(&uiState, currentTime);
         Display_RenderClickWheel(wheel.leftDown ? wheel.activeButton : 0);
@@ -266,6 +296,7 @@ int main(void) {
     }
 
     Display_Shutdown();
+    SimAudio_Shutdown();
     SDL_Quit();
     return 0;
 }

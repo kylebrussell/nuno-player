@@ -33,7 +33,8 @@ void updatePlaybackInfo(UIState* state,
  */
 void updateTrackInfo(UIState* state, 
                     const char* trackTitle, 
-                    const char* artistName);
+                    const char* artistName,
+                    const char* albumName);
 
 /**
  * @brief Update volume level in UI state

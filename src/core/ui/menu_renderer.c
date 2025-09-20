@@ -10,6 +10,7 @@
 #define SCROLL_ANIMATION_DURATION_MS 150
 #define TRANSITION_ANIMATION_DURATION_MS 200
 #define PROGRESS_BAR_HEIGHT 2
+#define PROGRESS_BAR_MARGIN_X 8
 #define BATTERY_ICON_WIDTH 15
 #define BATTERY_ICON_HEIGHT 8
 
@@ -176,50 +177,57 @@ static void renderNowPlayingView(const UIState* state, uint32_t currentTime) {
 
     Display_DrawText(artist, artistX, artistY, NORMAL_TEXT_COLOR);
 
-    // Time display (current/total) - centered below artist
+    // Progress bar and timestamps near the bottom, like iPod mini
+    int timeY = DISPLAY_HEIGHT - TEXT_HEIGHT - 2;
+    int progressBarY = timeY - (PROGRESS_BAR_HEIGHT + 6);
+    int barX = PROGRESS_BAR_MARGIN_X;
+    int barW = DISPLAY_WIDTH - (PROGRESS_BAR_MARGIN_X * 2);
+    if (barW < 0) barW = 0;
+    if (state->totalTrackTime > 0) {
+        // Background band
+        Display_FillRect(barX, progressBarY - 1, barW, PROGRESS_BAR_HEIGHT + 2, 0);
+
+        // Fill width based on progress
+        int progressWidth = (int)((float)state->currentTrackTime / state->totalTrackTime * barW);
+        if (progressWidth < 0) {
+            progressWidth = 0;
+        } else if (progressWidth > barW) {
+            progressWidth = barW;
+        }
+        Display_FillRect(barX, progressBarY, progressWidth, PROGRESS_BAR_HEIGHT, NORMAL_TEXT_COLOR);
+
+        // Border
+        Display_DrawRect(barX, progressBarY - 1, barW, PROGRESS_BAR_HEIGHT + 2, NORMAL_TEXT_COLOR);
+    }
+
+    // Time display flanking the bar (elapsed left, remaining right)
     uint16_t currentMin = state->currentTrackTime / 60;
     uint16_t currentSec = state->currentTrackTime % 60;
     uint16_t totalMin = state->totalTrackTime / 60;
     uint16_t totalSec = state->totalTrackTime % 60;
 
-    char timeStr[16];
-    snprintf(timeStr, sizeof(timeStr), "%02u:%02u / %02u:%02u",
-             currentMin, currentSec, totalMin, totalSec);
+    char leftTime[8];
+    snprintf(leftTime, sizeof(leftTime), "%u:%02u", currentMin, currentSec);
+    Display_DrawText(leftTime, TEXT_MARGIN, timeY, NORMAL_TEXT_COLOR);
 
-    int timeWidth = (int)strlen(timeStr) * 5;
-    int timeX = (DISPLAY_WIDTH - timeWidth) / 2;
-    int timeY = 50; // Tighter spacing for iPod mini look
+    uint16_t rem = (totalMin * 60 + totalSec) > (currentMin * 60 + currentSec)
+        ? (uint16_t)((totalMin * 60 + totalSec) - (currentMin * 60 + currentSec))
+        : 0;
+    char rightTime[8];
+    snprintf(rightTime, sizeof(rightTime), "-%u:%02u", (uint16_t)(rem / 60), (uint16_t)(rem % 60));
+    int rightWidth = (int)strlen(rightTime) * 5;
+    int rightX = DISPLAY_WIDTH - rightWidth - TEXT_MARGIN;
+    if (rightX < 0) rightX = 0;
+    Display_DrawText(rightTime, rightX, timeY, NORMAL_TEXT_COLOR);
 
-    Display_DrawText(timeStr, timeX, timeY, NORMAL_TEXT_COLOR);
-
-    // Play/Pause indicator (more iPod mini-like positioning)
+    // Play/Pause indicator (position above the bar to avoid bottom overlap)
     const char* playState = state->isPlaying ? "▶" : "⏸";
-    int playStateX = (DISPLAY_WIDTH - 6) / 2; // 6 is approximate width of play/pause symbol
-    int playStateY = timeY + 16; // Better spacing
+    int playStateX = (DISPLAY_WIDTH - 6) / 2; // approx width of symbol
+    int playStateY = progressBarY - 10;
+    if (playStateY < TITLE_BAR_HEIGHT + 2) playStateY = TITLE_BAR_HEIGHT + 2;
     Display_DrawText(playState, playStateX, playStateY, NORMAL_TEXT_COLOR);
 
-    // Progress bar at bottom (iPod mini style)
-    if (state->totalTrackTime > 0) {
-        // Draw progress bar background (light gray)
-        Display_FillRect(0, DISPLAY_HEIGHT - PROGRESS_BAR_HEIGHT - 2, DISPLAY_WIDTH, PROGRESS_BAR_HEIGHT + 2, 0);
-
-        // Draw progress bar fill
-        int progressWidth = (int)((float)state->currentTrackTime / state->totalTrackTime * DISPLAY_WIDTH);
-        if (progressWidth < 0) {
-            progressWidth = 0;
-        } else if (progressWidth > DISPLAY_WIDTH) {
-            progressWidth = DISPLAY_WIDTH;
-        }
-
-        Display_FillRect(0, DISPLAY_HEIGHT - PROGRESS_BAR_HEIGHT - 1, progressWidth, PROGRESS_BAR_HEIGHT, NORMAL_TEXT_COLOR);
-
-        // Draw progress bar border
-        Display_DrawRect(0, DISPLAY_HEIGHT - PROGRESS_BAR_HEIGHT - 2, DISPLAY_WIDTH, PROGRESS_BAR_HEIGHT + 2, NORMAL_TEXT_COLOR);
-    }
-
-    // Instructions at bottom (iPod mini style)
-    Display_DrawText("MENU", TEXT_MARGIN, DISPLAY_HEIGHT - 12, NORMAL_TEXT_COLOR);
-    Display_DrawText("PLAY/PAUSE", DISPLAY_WIDTH - 75, DISPLAY_HEIGHT - 12, NORMAL_TEXT_COLOR);
+    // Bottom instructions removed for cleaner iPod mini look
 }
 
 bool MenuRenderer_IsAnimating(void) {

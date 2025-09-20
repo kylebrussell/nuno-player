@@ -39,6 +39,10 @@ You can exercise the UI and menu flow locally without the embedded toolchain by 
 - `Backspace` or `Esc` – go back
 - `Space` – toggle play/pause state indicator
 
+## Sample Music Library
+
+The repository bundles a small public-domain library so you can exercise the audio stack without any setup. The tracks live under `assets/music/bach/open-goldberg-variations/` and come from Kimiko Ishizaka’s CC0 recording of J.S. Bach’s *Goldberg Variations*. In the simulator, navigate to `Music → Songs` to browse the bundled playlist and press the centre button to drill into `Now Playing`. Drop additional audio files anywhere beneath `assets/music/` and update `src/core/audio/music_catalog.c` if you want them to appear in the queue.
+
 ## Features (Planned)
 
 ### Audio

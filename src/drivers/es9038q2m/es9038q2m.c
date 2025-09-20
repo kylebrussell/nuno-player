@@ -3,21 +3,43 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Simulator mode - skip actual hardware operations
+#ifdef BUILD_SIM
+#define ES9038Q2M_SIM_MODE
+#endif
+
 // internal helper to write a single byte to a register
 static bool write_reg(uint8_t reg, uint8_t value) {
+#ifdef ES9038Q2M_SIM_MODE
+    (void)reg;
+    (void)value;
+    return true;  // Always succeed in simulator mode
+#else
     uint8_t data[2] = { reg, value };
     return platform_i2c_write(ES9038Q2M_I2C_ADDR, data, 2);
+#endif
 }
 
 // internal helper to read a single byte from a register
 static bool read_reg(uint8_t reg, uint8_t *value) {
+#ifdef ES9038Q2M_SIM_MODE
+    (void)reg;
+    *value = 0;  // Return 0 in simulator mode
+    return true;
+#else
     if (!platform_i2c_write(ES9038Q2M_I2C_ADDR, &reg, 1))
         return false;
     return platform_i2c_read(ES9038Q2M_I2C_ADDR, value, 1);
+#endif
 }
 
 // improved clock configuration based on datasheet specs
 bool ES9038Q2M_ConfigureClock(uint32_t sample_rate, uint32_t master_clock) {
+#ifdef ES9038Q2M_SIM_MODE
+    (void)sample_rate;
+    (void)master_clock;
+    return true;  // Always succeed in simulator mode
+#else
     if (sample_rate == 0 || master_clock == 0) {
         return false;
     }
@@ -34,10 +56,15 @@ bool ES9038Q2M_ConfigureClock(uint32_t sample_rate, uint32_t master_clock) {
     // set clock divider with proper scaling (example: ratio/2)
     uint8_t divider = (uint8_t)(ratio / 2);
     return write_reg(ES9038Q2M_REG_CLOCK_DIVIDER, divider);
+#endif
 }
 
 // improved filter selection preserving other bits
 bool ES9038Q2M_SetFilter(ES9038Q2M_FilterType filter) {
+#ifdef ES9038Q2M_SIM_MODE
+    (void)filter;
+    return true;  // Always succeed in simulator mode
+#else
     uint8_t current;
     if (!read_reg(ES9038Q2M_REG_FILTER_SETTINGS, &current)) {
         return false;
@@ -58,6 +85,7 @@ bool ES9038Q2M_SetFilter(ES9038Q2M_FilterType filter) {
             return false;
     }
     return write_reg(ES9038Q2M_REG_FILTER_SETTINGS, current);
+#endif
 }
 
 // dac initialization sequence with error recovery
@@ -96,13 +124,23 @@ bool ES9038Q2M_Init(const ES9038Q2M_Config* config) {
 
 // volume control functions
 bool ES9038Q2M_SetVolume(uint8_t left, uint8_t right) {
+#ifdef ES9038Q2M_SIM_MODE
+    (void)left;
+    (void)right;
+    return true;  // Always succeed in simulator mode
+#else
     if (!write_reg(ES9038Q2M_REG_VOLUME_1, left))
         return false;
     return write_reg(ES9038Q2M_REG_VOLUME_2, right);
+#endif
 }
 
 // operating profile configuration
 bool ES9038Q2M_SetProfile(ES9038Q2M_Profile profile) {
+#ifdef ES9038Q2M_SIM_MODE
+    (void)profile;
+    return true;  // Always succeed in simulator mode
+#else
     uint8_t value = 0;
     switch (profile) {
         case ES9038Q2M_PROFILE_NORMAL:
@@ -118,44 +156,66 @@ bool ES9038Q2M_SetProfile(ES9038Q2M_Profile profile) {
             return false;
     }
     return write_reg(ES9038Q2M_REG_MASTER_MODE, value);
+#endif
 }
 
 // dsd/pcm mode switching
 bool ES9038Q2M_SetDSDMode(bool dsd_mode) {
+#ifdef ES9038Q2M_SIM_MODE
+    (void)dsd_mode;
+    return true;  // Always succeed in simulator mode
+#else
     uint8_t value = dsd_mode ? 0x01 : 0x00;
     return write_reg(ES9038Q2M_REG_DSD_CONFIG, value);
+#endif
 }
 
 // power management: power down
 bool ES9038Q2M_PowerDown(void) {
+#ifdef ES9038Q2M_SIM_MODE
+    return true;  // Always succeed in simulator mode
+#else
     uint8_t current;
     if (!read_reg(ES9038Q2M_REG_SYSTEM_SETTINGS, &current))
         return false;
     current |= ES9038Q2M_POWER_DOWN;
     return write_reg(ES9038Q2M_REG_SYSTEM_SETTINGS, current);
+#endif
 }
 
 // power management: power up
 bool ES9038Q2M_PowerUp(void) {
+#ifdef ES9038Q2M_SIM_MODE
+    return true;  // Always succeed in simulator mode
+#else
     uint8_t current;
     if (!read_reg(ES9038Q2M_REG_SYSTEM_SETTINGS, &current))
         return false;
     current &= ~ES9038Q2M_POWER_DOWN;
     return write_reg(ES9038Q2M_REG_SYSTEM_SETTINGS, current);
+#endif
 }
 
 // soft reset function
 bool ES9038Q2M_Reset(void) {
+#ifdef ES9038Q2M_SIM_MODE
+    return true;  // Always succeed in simulator mode
+#else
     if (!write_reg(ES9038Q2M_REG_SOFT_START, 0x01))
         return false;
     platform_delay_ms(10);
     return write_reg(ES9038Q2M_REG_SOFT_START, 0x00);
+#endif
 }
 
 // get dac status
 uint8_t ES9038Q2M_GetStatus(void) {
+#ifdef ES9038Q2M_SIM_MODE
+    return 0;  // Return success status in simulator mode
+#else
     uint8_t status = 0;
     if (!read_reg(ES9038Q2M_REG_STATUS, &status))
         return 0; // fallback
     return status;
+#endif
 }

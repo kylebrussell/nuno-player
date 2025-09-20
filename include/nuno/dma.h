@@ -18,6 +18,9 @@ bool DMA_StartAudioStreaming(void);
 // Stop current DMA transfer
 void DMA_StopTransfer(void);
 
+// Temporarily pause an active DMA transfer
+void DMA_PauseTransfer(void);
+
 // External callback declarations
 void HAL_DMA_TxCpltCallback(DMA_HandleTypeDef *hdma);
 void HAL_DMA_TxHalfCpltCallback(DMA_HandleTypeDef *hdma);
