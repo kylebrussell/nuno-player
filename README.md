@@ -14,7 +14,7 @@ Currently in the early stages of development, focusing on core embedded systems 
 - Core platform drivers (I2C, GPIO, DMA, I2S)
 
 ### Prototype Hardware (2026 refresh)
-- MCU dev board: STM32 NUCLEO-H743ZI2
+- MCU dev board: STM32 NUCLEO-H753ZI (preferred) or NUCLEO-H743ZI2 (original target; often listed as obsolete)
 - Audio: WM8960 I2S codec module (I2C control)
 - Input: Azoteq IQS550-based I2C trackpad module + single click switch
 

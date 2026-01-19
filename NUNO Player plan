@@ -9,7 +9,7 @@ Lossless FLAC audio playback
 
 Would aim to appeal to the Apple nostalgic techies who yearn for the days when devices were unique and beautiful and they spent less time doom scrolling on their smartphone. Willing to pay a premium for a device that satisfies that nostalgia while making real advances with the technology — see Analogue Pocket, ModRetro.
 Prototype hardware refresh (2026, simplify-fast)
-- Target dev board: STM32 NUCLEO-H743ZI2 (keeps the existing STM32H743 toolchain and HAL expectations).
+- Target dev board: STM32 NUCLEO-H753ZI (preferred) or NUCLEO-H743ZI2 (original target; often listed as obsolete) — keeps the existing STM32H7 toolchain and HAL expectations.
 - Audio output: WM8960 I2S codec module (I2C control, headphone/line out, 3.3V logic).
 - Trackpad: Azoteq IQS550-based I2C trackpad module (rectangular, typically 43x40mm or 65x49mm).
 - Click input: single low-profile tactile switch mounted under the pad (mechanical click).
