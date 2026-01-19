@@ -2,12 +2,14 @@
 #include "nuno/platform.h"
 #include "nuno/audio_buffer.h"
 #include "nuno/dma.h"
+#include "nuno/trackpad.h"
 #include "FreeRTOS.h"
 #include "task.h"
 
 #include "ui_tasks.h"       // For UI functions and definitions
 #include "ui_state.h"       // UI state and menu definitions
 #include "menu_renderer.h"  // UI renderer interface
+#include "nuno/input_mapper.h"
 
 // Error handler function prototype
 static void Error_Handler(void);
@@ -15,12 +17,15 @@ static void Error_Handler(void);
 // Audio processing task prototype
 static void AudioProcessingTask(void *parameters);
 static void UITask(void *parameters);
+static void InputTask(void *parameters);
 
 // Constants for task configuration
 #define AUDIO_TASK_STACK_SIZE     (configMINIMAL_STACK_SIZE * 2)
 #define AUDIO_TASK_PRIORITY       (tskIDLE_PRIORITY + 2)
 #define UI_TASK_STACK_SIZE        (configMINIMAL_STACK_SIZE * 3)
 #define UI_TASK_PRIORITY          (tskIDLE_PRIORITY + 1)
+#define INPUT_TASK_STACK_SIZE     (configMINIMAL_STACK_SIZE * 2)
+#define INPUT_TASK_PRIORITY       (tskIDLE_PRIORITY + 2)
 
 int main(void) {
     // Initialize HAL Library
@@ -33,6 +38,11 @@ int main(void) {
 
     // Initialize GPIOs
     GPIO_Init();
+
+    // Initialize I2C (shared by trackpad + codec control)
+    if (!platform_i2c_init()) {
+        Error_Handler();
+    }
 
     // Initialize DMA for audio transfer
     if (!DMA_Init()) {
@@ -77,6 +87,20 @@ int main(void) {
         NULL,
         UI_TASK_PRIORITY,
         &uiTaskHandle
+    );
+    if (xReturned != pdPASS) {
+        Error_Handler();
+    }
+
+    // Create the input task that polls the trackpad
+    TaskHandle_t inputTaskHandle;
+    xReturned = xTaskCreate(
+        InputTask,
+        "InputTask",
+        INPUT_TASK_STACK_SIZE,
+        NULL,
+        INPUT_TASK_PRIORITY,
+        &inputTaskHandle
     );
     if (xReturned != pdPASS) {
         Error_Handler();
@@ -134,6 +158,8 @@ static void UITask(void *parameters) {
         // Adjust with your tick frequency (if configTICK_RATE_HZ is not 1000)
         uint32_t currentTime = xTaskGetTickCount() * (1000 / configTICK_RATE_HZ);
 
+        InputMapper_ProcessEvents(&uiState, currentTime);
+
         // Process any UI events (from buttons, rotation, etc.)
         // In a real application, events might come from an ISR or queue.
         processUIEvents(&uiState, currentTime);
@@ -143,6 +169,19 @@ static void UITask(void *parameters) {
 
         // Delay to limit the refresh rate. Adjust delay as needed for smooth animations.
         vTaskDelay(pdMS_TO_TICKS(16)); // ~60 FPS refresh rate
+    }
+}
+
+static void InputTask(void *parameters) {
+    (void)parameters;
+
+    if (!Trackpad_Init()) {
+        Error_Handler();
+    }
+
+    for (;;) {
+        Trackpad_Poll();
+        vTaskDelay(pdMS_TO_TICKS(10)); // 100 Hz polling
     }
 }
 

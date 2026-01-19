@@ -83,6 +83,7 @@ add_library(core_ui
     src/core/ui/menu_items.c
     src/core/ui/ui_state.c
     src/core/ui/ui_tasks.c
+    src/core/ui/input_mapper.c
 )
 target_include_directories(core_ui PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -97,6 +98,8 @@ if(NOT BUILD_SIM)
       src/platform/i2c.c
       src/platform/gpio.c
       src/platform/dma.c
+      src/platform/audio_i2s.c
+      src/platform/input/trackpad.c
   )
   target_include_directories(platform PUBLIC
       "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -131,6 +134,7 @@ if(BUILD_SIM)
       src/platform/sim/platform_sim.c
       src/platform/sim/audio_controller.c
       src/platform/sim/filesystem_sim.c
+      src/platform/sim/audio_codec_sim.c
   )
   target_include_directories(nuno-sim PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/include"

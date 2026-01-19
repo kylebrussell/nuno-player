@@ -9,6 +9,12 @@ typedef struct {
     uint32_t State;
 } DMA_HandleTypeDef;
 
+typedef struct {
+    void* Instance;
+    uint32_t Init;
+    uint32_t State;
+} I2S_HandleTypeDef;
+
 // Add other HAL types as needed
 #else
 // Include actual STM32 HAL headers for embedded build

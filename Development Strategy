@@ -21,8 +21,8 @@ Hardware Integration
 
 Get basic hardware working with minimal feature set:
 
-DAC configuration
-Click wheel input
+Audio codec configuration (I2S + I2C control)
+Trackpad + click input
 Display output
 
 
@@ -31,7 +31,7 @@ Focus on driver development
 Priority Order for Implementation:
 Audio System
 
-    DAC driver
+    Codec driver (WM8960 or equivalent)
     Audio buffer management
     Basic playback controls
 
@@ -44,5 +44,5 @@ Storage System
 UI System
 
     Menu navigation
-    Click wheel input
+    Trackpad input (tap zones + scroll)
     Display output

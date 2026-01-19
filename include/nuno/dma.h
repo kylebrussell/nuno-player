@@ -22,7 +22,7 @@ void DMA_StopTransfer(void);
 void DMA_PauseTransfer(void);
 
 // External callback declarations
-void HAL_DMA_TxCpltCallback(DMA_HandleTypeDef *hdma);
-void HAL_DMA_TxHalfCpltCallback(DMA_HandleTypeDef *hdma);
+void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s);
+void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s);
 
 #endif // DMA_H

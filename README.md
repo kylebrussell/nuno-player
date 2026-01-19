@@ -9,8 +9,14 @@ Currently in the early stages of development, focusing on core embedded systems 
 ### Current Focus Areas
 - Audio playback pipeline implementation
 - Basic UI state machine development
+- Square trackpad input integration (tap zones + scroll)
 - Hardware abstraction layer
-- Core platform drivers (I2C, GPIO, DMA)
+- Core platform drivers (I2C, GPIO, DMA, I2S)
+
+### Prototype Hardware (2026 refresh)
+- MCU dev board: STM32 NUCLEO-H743ZI2
+- Audio: WM8960 I2S codec module (I2C control)
+- Input: Azoteq IQS550-based I2C trackpad module + single click switch
 
 ## Simulator Quick Start
 
@@ -38,6 +44,12 @@ You can exercise the UI and menu flow locally without the embedded toolchain by 
 - `Enter` – select menu item
 - `Backspace` or `Esc` – go back
 - `Space` – toggle play/pause state indicator
+
+### Simulator Trackpad Mode (experimental)
+- Press `t` to toggle square trackpad mode on/off
+- Drag inside the square (wheel bounding box) – scroll
+- Tap zones: top=MENU, left=PREV, right=NEXT, bottom=PLAY
+- Right click – CENTER/Select
 
 ## Sample Music Library
 

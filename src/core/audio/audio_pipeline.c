@@ -2,7 +2,7 @@
 
 #include "nuno/audio_buffer.h"
 #include "nuno/dma.h"
-#include "nuno/es9038q2m.h"
+#include "nuno/audio_codec.h"
 #include "nuno/format_decoder.h"
 #include "nuno/music_library.h"
 #include "nuno/platform.h"
@@ -21,14 +21,13 @@ typedef struct {
     EndOfPlaylistCallback playlist_callback;
     bool end_of_playlist;
     bool transition_pending;
-    ES9038Q2M_Config dac_config;
 } AudioPipelineContext;
 
 static AudioPipelineContext g_pipeline;
 
 static void set_state(PipelineState new_state);
 static bool ensure_buffer_ready(void);
-static void configure_dac(uint32_t sample_rate, uint8_t bit_depth);
+static void configure_codec(uint32_t sample_rate, uint8_t bit_depth);
 static void update_next_track_status(void);
 
 bool AudioPipeline_Init(void) {
@@ -41,13 +40,6 @@ bool AudioPipeline_Init(void) {
     g_pipeline.config.gapless_enabled = false;
     g_pipeline.config.crossfade_enabled = false;
 
-    g_pipeline.dac_config.volume_left = 200U;
-    g_pipeline.dac_config.volume_right = 200U;
-    g_pipeline.dac_config.filter_type = ES9038Q2M_FILTER_FAST_ROLL_OFF;
-    g_pipeline.dac_config.dsd_mode = false;
-    g_pipeline.dac_config.sample_rate = g_pipeline.config.sample_rate;
-    g_pipeline.dac_config.bit_depth = g_pipeline.config.bit_depth;
-
     printf("Initializing audio buffer...\n");
     if (!AudioBuffer_Init()) {
         printf("AudioBuffer_Init failed\n");
@@ -55,12 +47,12 @@ bool AudioPipeline_Init(void) {
     }
     printf("Audio buffer initialized\n");
 
-    printf("Initializing DAC...\n");
-    if (!ES9038Q2M_Init(&g_pipeline.dac_config)) {
-        printf("ES9038Q2M_Init failed\n");
+    printf("Initializing audio codec...\n");
+    if (!AudioCodec_Init(g_pipeline.config.sample_rate, g_pipeline.config.bit_depth)) {
+        printf("AudioCodec_Init failed\n");
         return false;
     }
-    printf("DAC initialized\n");
+    printf("Audio codec initialized\n");
 
     printf("Initializing music library with path: %s\n", NUNO_DEFAULT_LIBRARY_PATH);
     if (!MusicLibrary_Init(NUNO_DEFAULT_LIBRARY_PATH)) {
@@ -112,7 +104,7 @@ bool AudioPipeline_Play(void) {
         return false;
     }
 
-    if (!ES9038Q2M_PowerUp()) {
+    if (!AudioCodec_PowerUp()) {
         return false;
     }
 
@@ -130,7 +122,7 @@ bool AudioPipeline_Pause(void) {
 
     DMA_PauseTransfer();
     AudioBuffer_Pause();
-    ES9038Q2M_PowerDown();
+    AudioCodec_PowerDown();
 
     set_state(PIPELINE_STATE_PAUSED);
     return true;
@@ -144,7 +136,7 @@ bool AudioPipeline_Stop(void) {
     DMA_StopTransfer();
     AudioBuffer_Flush(false);
     AudioBuffer_ClearDecoder();
-    ES9038Q2M_PowerDown();
+    AudioCodec_PowerDown();
 
     set_state(PIPELINE_STATE_STOPPED);
     g_pipeline.transition_pending = false;
@@ -240,8 +232,7 @@ bool AudioPipeline_PlayTrack(size_t track_index) {
 }
 
 bool AudioPipeline_SetVolume(uint8_t volume) {
-    uint8_t scaled = (uint8_t)((volume * 255U) / 100U);
-    return ES9038Q2M_SetVolume(scaled, scaled);
+    return AudioCodec_SetVolume(volume);
 }
 
 bool AudioPipeline_Configure(const AudioPipelineConfig *config) {
@@ -250,7 +241,7 @@ bool AudioPipeline_Configure(const AudioPipelineConfig *config) {
     }
 
     g_pipeline.config = *config;
-    configure_dac(config->sample_rate, config->bit_depth);
+    configure_codec(config->sample_rate, config->bit_depth);
 
     if (g_pipeline.state == PIPELINE_STATE_PLAYING) {
         ensure_buffer_ready();
@@ -333,11 +324,11 @@ bool AudioPipeline_Seek(size_t sample_position) {
 }
 
 bool AudioPipeline_ReconfigureFormat(uint32_t new_sample_rate, uint8_t new_bit_depth) {
-    configure_dac(new_sample_rate, new_bit_depth);
+    configure_codec(new_sample_rate, new_bit_depth);
     AudioBuffer_ConfigureSampleRate(new_sample_rate, new_sample_rate);
     AudioBuffer_ConfigureSampleFormat(new_bit_depth, false, true);
 
-    if (!ES9038Q2M_ConfigureClock(new_sample_rate, new_sample_rate * 256U)) {
+    if (!AudioCodec_Init(new_sample_rate, new_bit_depth)) {
         return false;
     }
     return true;
@@ -412,9 +403,8 @@ static bool ensure_buffer_ready(void) {
     return true;
 }
 
-static void configure_dac(uint32_t sample_rate, uint8_t bit_depth) {
-    g_pipeline.dac_config.sample_rate = sample_rate;
-    g_pipeline.dac_config.bit_depth = bit_depth;
+static void configure_codec(uint32_t sample_rate, uint8_t bit_depth) {
+    (void)AudioCodec_Init(sample_rate, bit_depth);
 }
 
 static void update_next_track_status(void) {

@@ -8,6 +8,21 @@ an even smoother Click Wheel scrolling UI, faster transitions between menus, and
 Lossless FLAC audio playback
 
 Would aim to appeal to the Apple nostalgic techies who yearn for the days when devices were unique and beautiful and they spent less time doom scrolling on their smartphone. Willing to pay a premium for a device that satisfies that nostalgia while making real advances with the technology — see Analogue Pocket, ModRetro.
+Prototype hardware refresh (2026, simplify-fast)
+- Target dev board: STM32 NUCLEO-H743ZI2 (keeps the existing STM32H743 toolchain and HAL expectations).
+- Audio output: WM8960 I2S codec module (I2C control, headphone/line out, 3.3V logic).
+- Trackpad: Azoteq IQS550-based I2C trackpad module (rectangular, typically 43x40mm or 65x49mm).
+- Click input: single low-profile tactile switch mounted under the pad (mechanical click).
+- Pin map (prototype):
+  - I2C1 (trackpad + codec control): PB8=SCL, PB9=SDA
+  - Trackpad I2C address: 0x74 (7-bit, IQS550 default)
+  - Trackpad click switch: PC13 (pull-up, active low)
+  - I2S2 (audio out to WM8960): PB12=LRCK/WS, PB13=BCLK/SCK, PB15=SD, PC6=MCLK
+  - Trackpad interrupt (optional): PA1
+- UI mapping for square trackpad:
+  - Drag = scroll (generates rotation ticks)
+  - Tap zones: top=MENU, left=PREV, right=NEXT, bottom=PLAY
+  - Click switch = CENTER/Select
 Software system breakdown
 Real-Time Operating System (FreeRTOS)
 Task Management
