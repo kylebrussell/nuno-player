@@ -11,7 +11,7 @@
 
 typedef struct {
     uint16_t data[DMA_BUFFER_COUNT][AUDIO_BUFFER_SIZE];
-    size_t valid_samples[DMA_BUFFER_COUNT];
+    size_t valid_samples[DMA_BUFFER_COUNT];  // frames (interleaved stereo)
     size_t active;
 
     BufferState state;
@@ -162,7 +162,7 @@ void AudioBuffer_HandleUnderrun(void) {
     memset(g_buffer.data[g_buffer.active], 0, AUDIO_BUFFER_BYTES);
 
     g_buffer.underrun.timestamp_ms = start;
-    g_buffer.underrun.samples_lost = AUDIO_BUFFER_SIZE;
+    g_buffer.underrun.samples_lost = AUDIO_BUFFER_FRAMES;
 
     if (!fill_buffer(g_buffer.active)) {
         g_buffer.end_of_stream = true;
@@ -180,9 +180,16 @@ bool AudioBuffer_Seek(size_t position_in_samples) {
         return false;
     }
 
-    size_t byte_offset = position_in_samples * sizeof(uint16_t);
-    if (!FileSystem_Seek(byte_offset)) {
-        return false;
+    if (g_buffer.decoder) {
+        format_decoder_seek(g_buffer.decoder, position_in_samples);
+        if (format_decoder_get_last_error(g_buffer.decoder) != FD_ERROR_NONE) {
+            return false;
+        }
+    } else {
+        size_t byte_offset = position_in_samples * sizeof(uint16_t);
+        if (!FileSystem_Seek(byte_offset)) {
+            return false;
+        }
     }
 
     g_buffer.end_of_stream = false;
@@ -241,7 +248,7 @@ void AudioBuffer_RegisterUnderrunCallback(void (*callback)(void)) {
 }
 
 void AudioBuffer_ConfigureThresholds(size_t low_threshold, size_t high_threshold) {
-    if (low_threshold >= high_threshold || high_threshold > AUDIO_BUFFER_SIZE) {
+    if (low_threshold >= high_threshold || high_threshold > AUDIO_BUFFER_FRAMES) {
         return;
     }
     g_buffer.low_threshold = low_threshold;
@@ -258,7 +265,7 @@ void AudioBuffer_GetThresholdConfig(size_t *low_threshold,
         *high_threshold = g_buffer.high_threshold;
     }
     if (percentage) {
-        *percentage = (float)g_buffer.low_threshold / (float)AUDIO_BUFFER_SIZE;
+        *percentage = (float)g_buffer.low_threshold / (float)AUDIO_BUFFER_FRAMES;
     }
 }
 
@@ -430,7 +437,7 @@ FormatDecoder* AudioBuffer_GetDecoder(void) {
 static void reset_internal_state(void) {
     memset(&g_buffer, 0, sizeof(g_buffer));
     g_buffer.low_threshold = AUDIO_BUFFER_LOW_WATER_MARK;
-    g_buffer.high_threshold = AUDIO_BUFFER_SIZE;
+    g_buffer.high_threshold = AUDIO_BUFFER_FRAMES;
     g_buffer.read_cfg.min_bytes = AUDIO_BUFFER_BYTES / 4U;
     g_buffer.read_cfg.max_bytes = AUDIO_BUFFER_BYTES;
     g_buffer.read_cfg.optimal_bytes = AUDIO_BUFFER_BYTES / 2U;
@@ -453,73 +460,101 @@ static bool fill_buffer(size_t index) {
         // Fallback to raw data reading if no decoder
         size_t bytes_read = FileSystem_ReadAudioData(g_buffer.data[index], AUDIO_BUFFER_BYTES);
         size_t samples_read = bytes_read / sizeof(uint16_t);
+        size_t frames_read = samples_read / AUDIO_OUT_CHANNELS;
 
         if (samples_read < AUDIO_BUFFER_SIZE) {
             size_t remaining = AUDIO_BUFFER_SIZE - samples_read;
             memset(&g_buffer.data[index][samples_read], 0, remaining * sizeof(uint16_t));
-            g_buffer.end_of_stream = (samples_read == 0U);
+            g_buffer.end_of_stream = (frames_read == 0U);
         }
 
-        g_buffer.valid_samples[index] = samples_read;
-        g_buffer.stats.total_samples += samples_read;
-        printf("Fallback read: %zu samples\n", samples_read);
-        return samples_read > 0U;
+        g_buffer.valid_samples[index] = frames_read;
+        g_buffer.stats.total_samples += frames_read;
+        printf("Fallback read: %zu frames\n", frames_read);
+        return frames_read > 0U;
     }
 
-    // Use format decoder to get decoded audio data (mono mixdown if stereo)
-    size_t samples_read = 0;
-    float decode_buffer[AUDIO_BUFFER_SIZE * 2U];
+    // Use format decoder to get decoded audio data (downmix to stereo if needed)
+    size_t frames_read_total = 0;
+    uint32_t channels = format_decoder_get_channels(g_buffer.decoder);
+    if (channels == 0U) {
+        channels = AUDIO_OUT_CHANNELS;
+    }
+    if (channels > 8U) {
+        printf("Unsupported channel count: %u\n", channels);
+        g_buffer.end_of_stream = true;
+        return false;
+    }
+
+    static float decode_buffer[AUDIO_BUFFER_FRAMES * 8U];
 
     printf("Using format decoder...\n");
-    while (samples_read < AUDIO_BUFFER_SIZE) {
-        size_t frames_to_read = AUDIO_BUFFER_SIZE - samples_read;
+    while (frames_read_total < AUDIO_BUFFER_FRAMES) {
+        size_t frames_to_read = AUDIO_BUFFER_FRAMES - frames_read_total;
         // Read interleaved float frames (channels from decoder)
-        size_t frames_read = format_decoder_read(g_buffer.decoder, &decode_buffer[samples_read * 2U], frames_to_read);
+        size_t frames_read = format_decoder_read(g_buffer.decoder, decode_buffer, frames_to_read);
 
         if (frames_read == 0) {
             printf("No more frames from decoder\n");
-            // End of stream
             break;
         }
 
-        samples_read += frames_read;
-        printf("Read %zu frames, total %zu\n", frames_read, samples_read);
-    }
+        for (size_t i = 0; i < frames_read; i++) {
+            float left = 0.0f;
+            float right = 0.0f;
 
-    // Convert float samples to 16-bit integers; mixdown stereo to mono
-    uint32_t channels = format_decoder_get_channels(g_buffer.decoder);
-    if (channels == 0U) {
-        channels = 2U; // assume stereo if unknown
-    }
-    for (size_t i = 0; i < samples_read; i++) {
-        float sample = 0.0f;
-        if (channels == 1U) {
-            sample = decode_buffer[i];
-        } else {
-            float left = decode_buffer[i * 2U + 0U];
-            float right = decode_buffer[i * 2U + 1U];
-            sample = (left + right) * 0.5f;
+            if (channels == 1U) {
+                left = decode_buffer[i];
+                right = decode_buffer[i];
+            } else if (channels == 2U) {
+                left = decode_buffer[i * channels + 0U];
+                right = decode_buffer[i * channels + 1U];
+            } else {
+                left = decode_buffer[i * channels + 0U];
+                right = decode_buffer[i * channels + 1U];
+                for (uint32_t ch = 2U; ch < channels; ch++) {
+                    float sample = decode_buffer[i * channels + ch];
+                    left += sample;
+                    right += sample;
+                }
+                float scale = 1.0f / (float)channels;
+                left *= scale;
+                right *= scale;
+            }
+
+            if (left > 1.0f) left = 1.0f;
+            if (left < -1.0f) left = -1.0f;
+            if (right > 1.0f) right = 1.0f;
+            if (right < -1.0f) right = -1.0f;
+
+            int16_t left_i = (int16_t)(left * 32767.0f);
+            int16_t right_i = (int16_t)(right * 32767.0f);
+            size_t out_index = (frames_read_total + i) * AUDIO_OUT_CHANNELS;
+            g_buffer.data[index][out_index] = (uint16_t)left_i;
+            g_buffer.data[index][out_index + 1U] = (uint16_t)right_i;
         }
-        if (sample > 1.0f) sample = 1.0f;
-        if (sample < -1.0f) sample = -1.0f;
-        int16_t int_sample = (int16_t)(sample * 32767.0f);
-        g_buffer.data[index][i] = (uint16_t)int_sample;
+
+        frames_read_total += frames_read;
+        printf("Read %zu frames, total %zu\n", frames_read, frames_read_total);
     }
 
-    if (samples_read < AUDIO_BUFFER_SIZE) {
-        size_t remaining = AUDIO_BUFFER_SIZE - samples_read;
-        memset(&g_buffer.data[index][samples_read], 0, remaining * sizeof(uint16_t));
-        g_buffer.end_of_stream = (samples_read == 0U);
+    if (frames_read_total < AUDIO_BUFFER_FRAMES) {
+        size_t remaining_frames = AUDIO_BUFFER_FRAMES - frames_read_total;
+        size_t remaining_samples = remaining_frames * AUDIO_OUT_CHANNELS;
+        memset(&g_buffer.data[index][frames_read_total * AUDIO_OUT_CHANNELS],
+               0,
+               remaining_samples * sizeof(uint16_t));
+        g_buffer.end_of_stream = (frames_read_total == 0U);
     }
 
-    g_buffer.valid_samples[index] = samples_read;
-    g_buffer.stats.total_samples += samples_read;
-    printf("Buffer filled with %zu samples\n", samples_read);
-    return samples_read > 0U;
+    g_buffer.valid_samples[index] = frames_read_total;
+    g_buffer.stats.total_samples += frames_read_total;
+    printf("Buffer filled with %zu frames\n", frames_read_total);
+    return frames_read_total > 0U;
 }
 
 static void update_utilisation(size_t available_samples) {
-    float current = (float)available_samples / (float)AUDIO_BUFFER_SIZE;
+    float current = (float)available_samples / (float)AUDIO_BUFFER_FRAMES;
     g_buffer.stats.average_utilisation =
         (g_buffer.stats.average_utilisation * 0.9f) + (current * 0.1f);
 }

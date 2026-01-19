@@ -9,6 +9,9 @@
 // Initialize DMA for audio streaming
 bool DMA_Init(void);
 
+// Reconfigure DMA/I2S audio settings (sample rate/bit depth)
+bool DMA_Reconfigure(uint32_t sample_rate, uint8_t bit_depth);
+
 // Start DMA Transfer
 bool DMA_StartTransfer(void *data, size_t len);
 

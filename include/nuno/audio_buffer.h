@@ -8,9 +8,11 @@
 struct FormatDecoder;  // Forward declaration
 typedef struct FormatDecoder FormatDecoder;
 
+#define AUDIO_OUT_CHANNELS 2U
 #define AUDIO_BUFFER_SIZE 4096U
+#define AUDIO_BUFFER_FRAMES (AUDIO_BUFFER_SIZE / AUDIO_OUT_CHANNELS)
 #define AUDIO_BUFFER_BYTES (AUDIO_BUFFER_SIZE * sizeof(uint16_t))
-#define AUDIO_BUFFER_LOW_WATER_MARK (AUDIO_BUFFER_SIZE / 4U)
+#define AUDIO_BUFFER_LOW_WATER_MARK (AUDIO_BUFFER_FRAMES / 4U)
 
 typedef enum {
     BUFFER_STATE_EMPTY,

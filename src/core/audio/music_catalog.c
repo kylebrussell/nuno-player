@@ -21,6 +21,14 @@ const MusicLibraryTrack g_music_library_tracks[] = {
         .artist = "Kimiko Ishizaka",
         .filename = "bach/open-goldberg-variations/Kimiko_Ishizaka_-_Open_Goldberg_Variations_-_03_Variatio_2.mp3",
         .duration_seconds = 0U
+    },
+    {
+        .title = "Aria (FLAC test)",
+        .album = "Open Goldberg Variations",
+        .artist = "Kimiko Ishizaka",
+        // Drop the FLAC file under assets/music/ to enable this entry.
+        .filename = "bach/open-goldberg-variations/Kimiko_Ishizaka_-_Open_Goldberg_Variations_-_01_Aria.flac",
+        .duration_seconds = 0U
     }
 };
 

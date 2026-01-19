@@ -10,6 +10,42 @@ static SDL_AudioSpec g_audio_spec;
 static bool g_audio_initialised = false;
 static size_t g_buffer_offset_samples = 0;  // how many samples consumed in current buffer
 
+static void audio_callback(void* userdata, Uint8* stream, int len);
+
+static bool open_audio_device(uint32_t sample_rate) {
+    SDL_AudioSpec want, have;
+
+    if (SDL_WasInit(SDL_INIT_AUDIO) == 0) {
+        printf("SDL audio not initialized, trying to init...\n");
+        if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
+            printf("SDL_InitSubSystem audio failed: %s\n", SDL_GetError());
+            return false;
+        }
+    }
+
+    SDL_zero(want);
+    want.freq = (int)sample_rate;
+    want.format = AUDIO_S16SYS;
+    want.channels = 2;
+    want.samples = 2048;
+    want.callback = audio_callback;
+    want.userdata = NULL;
+
+    printf("Opening audio device...\n");
+    g_audio_device = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    if (g_audio_device == 0) {
+        printf("SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
+        return false;
+    }
+
+    printf("Audio device opened successfully, spec: freq=%d, format=%d, channels=%d, samples=%d\n",
+           have.freq, have.format, have.channels, have.samples);
+
+    g_audio_spec = have;
+    g_audio_initialised = true;
+    return true;
+}
+
 static void audio_callback(void* userdata, Uint8* stream, int len) {
     (void)userdata;
 
@@ -79,30 +115,20 @@ bool DMA_Init(void) {
         }
     }
 
-    SDL_AudioSpec want, have;
+    g_buffer_offset_samples = 0;
+    return open_audio_device(44100U);
+}
 
-    // Request audio format
-    SDL_zero(want);
-    want.freq = 44100;  // Standard sample rate
-    want.format = AUDIO_S16SYS;  // 16-bit signed integer
-    want.channels = 2;  // Stereo
-    want.samples = 2048;  // Buffer size
-    want.callback = audio_callback;
-    want.userdata = NULL;
+bool DMA_Reconfigure(uint32_t sample_rate, uint8_t bit_depth) {
+    (void)bit_depth;
 
-    printf("Opening audio device...\n");
-    g_audio_device = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
-    if (g_audio_device == 0) {
-        printf("SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
-        return false;
+    if (g_audio_device != 0) {
+        SDL_CloseAudioDevice(g_audio_device);
+        g_audio_device = 0;
     }
-
-    printf("Audio device opened successfully, spec: freq=%d, format=%d, channels=%d, samples=%d\n",
-           have.freq, have.format, have.channels, have.samples);
-
-    g_audio_spec = have;
-    g_audio_initialised = true;
-    return true;
+    g_audio_initialised = false;
+    g_buffer_offset_samples = 0;
+    return open_audio_device(sample_rate);
 }
 
 bool DMA_StartTransfer(void *buffer, size_t size) {

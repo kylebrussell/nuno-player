@@ -93,6 +93,13 @@ bool AudioPipeline_Play(void) {
             }
 
             if (format_decoder_open(decoder, full_path)) {
+                uint32_t sample_rate = format_decoder_get_sample_rate(decoder);
+                if (sample_rate != 0U && sample_rate != g_pipeline.config.sample_rate) {
+                    if (!AudioPipeline_ReconfigureFormat(sample_rate, g_pipeline.config.bit_depth)) {
+                        format_decoder_destroy(decoder);
+                        return false;
+                    }
+                }
                 AudioBuffer_SetDecoder(decoder);
             } else {
                 format_decoder_destroy(decoder);
@@ -208,6 +215,14 @@ bool AudioPipeline_PlayTrack(size_t track_index) {
         if (decoder) {
             if (format_decoder_open(decoder, full_path)) {
                 printf("Successfully opened decoder\n");
+                uint32_t sample_rate = format_decoder_get_sample_rate(decoder);
+                if (sample_rate != 0U && sample_rate != g_pipeline.config.sample_rate) {
+                    if (!AudioPipeline_ReconfigureFormat(sample_rate, g_pipeline.config.bit_depth)) {
+                        printf("Failed to reconfigure format\n");
+                        format_decoder_destroy(decoder);
+                        return false;
+                    }
+                }
                 AudioBuffer_SetDecoder(decoder);
             } else {
                 printf("Failed to open decoder\n");
@@ -324,14 +339,16 @@ bool AudioPipeline_Seek(size_t sample_position) {
 }
 
 bool AudioPipeline_ReconfigureFormat(uint32_t new_sample_rate, uint8_t new_bit_depth) {
-    configure_codec(new_sample_rate, new_bit_depth);
+    g_pipeline.config.sample_rate = new_sample_rate;
+    g_pipeline.config.bit_depth = new_bit_depth;
     AudioBuffer_ConfigureSampleRate(new_sample_rate, new_sample_rate);
     AudioBuffer_ConfigureSampleFormat(new_bit_depth, false, true);
 
-    if (!AudioCodec_Init(new_sample_rate, new_bit_depth)) {
+    if (!DMA_Reconfigure(new_sample_rate, new_bit_depth)) {
         return false;
     }
-    return true;
+
+    return AudioCodec_Init(new_sample_rate, new_bit_depth);
 }
 
 void AudioPipeline_RegisterEndOfPlaylistCallback(EndOfPlaylistCallback callback) {

@@ -34,10 +34,8 @@ if(NOT BUILD_SIM)
   find_package(FreeRTOS REQUIRED)
 endif()
 
-# Audio core is only required for embedded builds.
-if(NOT BUILD_SIM)
-  find_package(LibFLAC REQUIRED)
-endif()
+# Audio decoder library (vendored) for FLAC support.
+find_package(LibFLAC REQUIRED)
 
 # Libraries
 add_library(drivers
@@ -71,12 +69,8 @@ target_compile_definitions(core_audio PUBLIC MINIMP3_IMPLEMENTATION)
 target_link_libraries(core_audio PUBLIC
     music_catalog
     drivers
+    LibFLAC::FLAC
 )
-if(NOT BUILD_SIM)
-  target_link_libraries(core_audio PUBLIC
-      LibFLAC::FLAC
-  )
-endif()
 
 add_library(core_ui
     src/core/ui/menu_renderer.c

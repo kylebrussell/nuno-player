@@ -50,6 +50,29 @@ bool DMA_Init(void) {
     return true;
 }
 
+bool DMA_Reconfigure(uint32_t sample_rate, uint8_t bit_depth) {
+    if (dma_active) {
+        DMA_StopTransfer();
+    }
+
+    I2S_HandleTypeDef *hi2s = AudioI2S_GetHandle();
+    if (hi2s) {
+        (void)HAL_I2S_DeInit(hi2s);
+    }
+
+    if (!AudioI2S_Init(sample_rate, bit_depth)) {
+        return false;
+    }
+
+    hi2s = AudioI2S_GetHandle();
+    if (!hi2s) {
+        return false;
+    }
+
+    __HAL_LINKDMA(hi2s, hdmatx, hdma_i2s_tx);
+    return true;
+}
+
 // Start DMA Transfer
 bool DMA_StartTransfer(void *data, size_t len) {
     I2S_HandleTypeDef *hi2s = AudioI2S_GetHandle();
