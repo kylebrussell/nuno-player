@@ -620,30 +620,34 @@ static void buildWheelLayer(uint8_t activeButton) {
         if (activeButton == BUTTON_CENTER) {
             crWheelPressGlow(&cv, w, ss, BUTTON_CENTER);
         }
-        /* Separate button row, drawn into the buffer with embossed labels. */
+        /* Separate button row — the iPod 3G's signature: four touch buttons
+         * with backlit-RED labels under the screen, pressed ones glowing. */
+        CRColor redLabel  = cr_rgb(0.85f, 0.17f, 0.15f);
+        CRColor redShadow = cr_rgb(0.42f, 0.05f, 0.05f);
+        CRColor pill = cr_from_nuno(p->chassis.bodyBottom);
         for (int i = 0; i < 4; ++i) {
             SDL_Rect r = rowButtonRect(i);
             int bx = r.x * ss, by = r.y * ss, bw = r.w * ss, bh = r.h * ss;
-            /* subtle pill background so the row reads as buttons */
-            CRColor pill = cr_from_nuno(p->chassis.bodyBottom);
-            cr_blend(&cv, 0, 0, pill, 0.0f); /* no-op guard */
+            bool pressed = (activeButton == kRowButtons[i]);
             CRRoundRect rr;
             rr.cx = bx + bw * 0.5f; rr.cy = by + bh * 0.5f;
             rr.hx = bw * 0.5f - 2 * ss; rr.hy = bh * 0.5f;
             rr.r = bh * 0.5f;
-            if (activeButton == kRowButtons[i]) {
-                rr.top = cr_rgb(0.95f, 0.95f, 0.98f);
-                rr.bottom = cr_rgb(0.80f, 0.80f, 0.85f);
+            if (pressed) {
+                /* soft red backlight wash behind a pressed button */
+                rr.top = cr_rgb(0.97f, 0.85f, 0.83f);
+                rr.bottom = cr_rgb(0.92f, 0.70f, 0.68f);
             } else {
-                rr.top = cr_add(pill, 0.06f);
-                rr.bottom = cr_add(pill, -0.06f);
+                rr.top = cr_add(pill, 0.05f);
+                rr.bottom = cr_add(pill, -0.05f);
             }
             rr.shade = NULL; rr.user = NULL;
             cr_fill_round_rect(&cv, &rr);
             int tw = measureChassisText(kRowLabels[i]) * ss;
+            CRColor lc = pressed ? cr_rgb(0.74f, 0.10f, 0.09f) : redLabel;
             crDrawChassisTextEmboss(&cv, kRowLabels[i],
                                     bx + (bw - tw) / 2,
-                                    by + (bh - 7 * ss) / 2, ss, label, emboss);
+                                    by + (bh - 7 * ss) / 2, ss, lc, redShadow);
         }
     } else {
         crWheelPressGlow(&cv, w, ss, activeButton);

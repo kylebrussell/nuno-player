@@ -205,7 +205,7 @@ static DeviceProfile build_spec(const DeviceSpec *d) {
      * upper face. The remaining vertical space below the screen houses the
      * wheel. */
     p.screen.originX = (canvasW - screenW) / 2;
-    p.screen.originY = clampi((canvasH - screenH) / 4, 10, mm_to_px(13.0f));
+    p.screen.originY = clampi((canvasH - screenH) * 18 / 100, mm_to_px(4.0f), mm_to_px(11.0f));
 
     /* Metrics: the screen footprint is now the panel's real physical size (mm x
      * PPMM), which is small in pixels (~100-180px tall). The 5x7 bitmap font at
@@ -220,27 +220,40 @@ static DeviceProfile build_spec(const DeviceSpec *d) {
     p.metrics.textHeight     = 12 * fontScale;
     p.metrics.textMargin     = 4 * fontScale;
 
-    /* A row of separate buttons (3G) sits between the screen and the wheel. */
-    int buttonBand = (d->wheelType == WHEEL_TOUCH_BUTTONS) ? mm_to_px(7.0f) : 0;
+    /*
+     * Lay the wheel out in the lower band of the body. The wheel is sized from
+     * the real wheel diameter, but SHRUNK to fit when a short body can't hold it
+     * (e.g. the short-and-wide nano 3G), so it never overflows the bottom edge.
+     * The 3G reserves extra room above the wheel for its separate button row.
+     */
+    bool hasButtonRow = (d->wheelType == WHEEL_TOUCH_BUTTONS);
+    int screenBottom = p.screen.originY + screenH;
+    int bottomMargin = mm_to_px(3.0f);
+    int reserveTop = hasButtonRow ? mm_to_px(11.0f) : mm_to_px(4.0f);
+
+    int bandTop = screenBottom + reserveTop;
+    int bandBottom = canvasH - bottomMargin;
+    int bandH = bandBottom - bandTop;
+    if (bandH < mm_to_px(16.0f)) bandH = mm_to_px(16.0f); /* guard tiny bodies */
 
     int outerR = mm_to_px(d->wheelDiam_mm * 0.5f);
+    int rFitHeight = bandH / 2;
+    int rFitWidth  = canvasW / 2 - mm_to_px(2.0f);
+    if (outerR > rFitHeight) outerR = rFitHeight;
+    if (outerR > rFitWidth)  outerR = rFitWidth;
+    if (outerR < mm_to_px(8.0f)) outerR = mm_to_px(8.0f);
     int innerR = (int)(outerR * 0.34f + 0.5f);
 
-    /* Centre the wheel within the lower face: the band between the bottom of
-     * the screen (plus any 3G button row) and the bottom of the body. */
-    int screenBottom = p.screen.originY + screenH + buttonBand;
-    int lowerCenter = (screenBottom + canvasH) / 2;
-    /* Keep the whole wheel inside the body with a small bottom margin. */
-    int minCenter = screenBottom + outerR + mm_to_px(2.0f);
-    int maxCenter = canvasH - outerR - mm_to_px(3.0f);
-    int centerY = clampi(lowerCenter, minCenter, maxCenter);
+    int centerY = clampi(bandTop + bandH / 2, bandTop + outerR, bandBottom - outerR);
 
     p.wheel.type = d->wheelType;
     p.wheel.centerX = canvasW / 2;
     p.wheel.centerY = centerY;
     p.wheel.outerRadius = outerR;
     p.wheel.innerRadius = innerR;
-    p.wheel.buttonRowY = p.screen.originY + screenH + buttonBand / 2 + 4;
+    /* 3G button row: centred in the gap between the screen and the wheel top. */
+    int wheelTop = centerY - outerR;
+    p.wheel.buttonRowY = (screenBottom + wheelTop) / 2;
 
     p.chassis.canvasWidth  = canvasW;
     p.chassis.canvasHeight = canvasH;
