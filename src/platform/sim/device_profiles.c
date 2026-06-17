@@ -207,9 +207,13 @@ static DeviceProfile build_spec(const DeviceSpec *d) {
     p.screen.originX = (canvasW - screenW) / 2;
     p.screen.originY = clampi((canvasH - screenH) / 4, 10, mm_to_px(13.0f));
 
-    /* Metrics: magnify the bitmap font on tall panels so text stays legible.
-     * Keyed off the screen pixel height: small panels render 1x, large ones 2x. */
-    int fontScale = (screenH >= 150) ? 2 : 1;
+    /* Metrics: the screen footprint is now the panel's real physical size (mm x
+     * PPMM), which is small in pixels (~100-180px tall). The 5x7 bitmap font at
+     * 1x already gives the authentic iPod look — small text, ~6-11 menu items.
+     * Magnifying to 2x here made text comically large and clipped rows, so 1x is
+     * the right call for the whole current lineup; reserve 2x for hypothetical
+     * much larger panels. */
+    int fontScale = (screenH >= 280) ? 2 : 1;
     p.metrics.fontScale = fontScale;
     p.metrics.titleBarHeight = 16 * fontScale;
     p.metrics.itemHeight     = 16 * fontScale;
