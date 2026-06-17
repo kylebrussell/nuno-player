@@ -4,6 +4,7 @@
 #include "nuno/format_decoder.h"
 #include "nuno/platform.h"
 
+#include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
@@ -20,6 +21,17 @@
  */
 #define VOLUME_MAX_PERCENT 100U
 #define VOLUME_RAMP_STEP   0.25f
+
+/*
+ * Crossfade tail ring. The producer keeps the last CROSSFADE_MAX_FRAMES frames
+ * of decoded (post-volume, float, downmixed-to-stereo) outgoing audio so that
+ * when the outgoing decoder hits EOF it can overlap-mix that already-emitted
+ * tail against the incoming track's head. The ring is a fixed producer-local
+ * buffer (no per-call allocation) sized to the maximum supported fade length;
+ * any requested fade is clamped to this. At 44.1 kHz, 4 s == 176400 frames.
+ * Stored as interleaved stereo floats: CROSSFADE_MAX_FRAMES * AUDIO_OUT_CHANNELS.
+ */
+#define CROSSFADE_MAX_FRAMES (4U * 44100U)
 
 /*
  * Unit conventions for this module (read before touching counts):
@@ -103,10 +115,43 @@ typedef struct {
         bool is_signed;
     } format;
 
+    /*
+     * Crossfade state.
+     *
+     *   target_frames  - control input (any thread, atomic). Desired fade
+     *                    length in frames; 0 == disabled. Snapshotted into
+     *                    'active_frames' when a transition begins.
+     *   in_progress    - producer-local: a fade is currently being mixed.
+     *   active_frames  - producer-local: the fade length in effect for the
+     *                    current fade (clamped to CROSSFADE_MAX_FRAMES and to
+     *                    however much outgoing tail was actually captured).
+     *   pos            - producer-local: frames already emitted into the fade.
+     *   incoming       - producer-local: the pre-opened decoder for the track
+     *                    being faded in. Owned here for the fade's duration and
+     *                    closed/destroyed when the fade completes or aborts.
+     *   tail[]/tail_count/tail_head - producer-local ring of recently emitted
+     *                    outgoing audio (interleaved stereo floats, already
+     *                    volume-scaled). tail_head is the index just past the
+     *                    most-recently written frame; tail_count saturates at
+     *                    CROSSFADE_MAX_FRAMES. The producer pushes here while a
+     *                    fade is ARMED but not yet in progress.
+     *   tail_anchor/tail_window - the FROZEN tail window for the in-flight fade:
+     *                    'tail_window' frames starting at ring index
+     *                    'tail_anchor'. Captured in crossfade_begin(); the
+     *                    producer stops pushing during the fade so this window
+     *                    stays valid and is read by absolute offset.
+     */
     struct {
-        bool enabled;
+        _Atomic uint32_t target_frames;
         bool in_progress;
-        uint32_t fade_samples;
+        uint32_t active_frames;
+        uint32_t pos;
+        FormatDecoder* incoming;
+        float tail[CROSSFADE_MAX_FRAMES * AUDIO_OUT_CHANNELS];
+        size_t tail_count;
+        size_t tail_head;
+        size_t tail_anchor;
+        uint32_t tail_window;
     } crossfade;
 
     FormatDecoder* decoder;
@@ -117,6 +162,8 @@ static AudioBufferState g_buffer;
 static void reset_internal_state(void);
 static bool fill_buffer(size_t index);
 static void update_utilisation(size_t available_frames);
+static void crossfade_release_incoming(void);
+static void crossfade_abort(void);
 
 /* Map a 0..100 volume percentage to a linear gain via a mild quadratic curve.
  * 100% -> 1.0 exactly (bit-exact passthrough); 0% -> 0.0 (silence). */
@@ -163,6 +210,7 @@ bool AudioBuffer_Init(void) {
 }
 
 void AudioBuffer_Cleanup(void) {
+    crossfade_abort();
     if (g_buffer.decoder) {
         format_decoder_close(g_buffer.decoder);
         format_decoder_destroy(g_buffer.decoder);
@@ -459,6 +507,10 @@ void AudioBuffer_GetSampleFormat(uint8_t *bits_per_sample,
 }
 
 bool AudioBuffer_Flush(bool reset_stats) {
+    /* A flush discards in-flight audio (Skip / Previous / track change), so any
+     * fade in progress and its captured tail must go too - otherwise the new
+     * track would inherit a stale fade or leak the incoming decoder. */
+    crossfade_abort();
     memset(g_buffer.data, 0, sizeof(g_buffer.data));
     for (size_t i = 0; i < DMA_BUFFER_COUNT; i++) {
         atomic_store_explicit(&g_buffer.valid_frames[i], 0U, memory_order_relaxed);
@@ -475,17 +527,18 @@ bool AudioBuffer_Flush(bool reset_stats) {
 }
 
 bool AudioBuffer_PrepareCrossfade(uint32_t fade_samples) {
-    g_buffer.crossfade.enabled = true;
-    g_buffer.crossfade.fade_samples = fade_samples;
+    /* Legacy entry point. Interpret the historical "samples" argument as a
+     * stereo-frame count and route it through the new atomic target so callers
+     * that still use it stay coherent with AudioBuffer_SetCrossfadeFrames. */
+    AudioBuffer_SetCrossfadeFrames(fade_samples);
     return true;
 }
 
 bool AudioBuffer_StartCrossfade(void) {
-    if (!g_buffer.crossfade.enabled) {
-        return false;
-    }
-    g_buffer.crossfade.in_progress = true;
-    return true;
+    /* The fade is driven automatically by the producer at EOF; there is no
+     * separate "start" trigger now. Report whether crossfade is armed. */
+    return atomic_load_explicit(&g_buffer.crossfade.target_frames,
+                                memory_order_relaxed) > 0U;
 }
 
 bool AudioBuffer_GetNextTrackSamples(int16_t *buffer, size_t samples) {
@@ -495,8 +548,7 @@ bool AudioBuffer_GetNextTrackSamples(int16_t *buffer, size_t samples) {
 }
 
 bool AudioBuffer_CompleteCrossfade(void) {
-    g_buffer.crossfade.in_progress = false;
-    return true;
+    return !g_buffer.crossfade.in_progress;
 }
 
 bool AudioBuffer_PrepareGaplessTransition(void) {
@@ -519,6 +571,9 @@ bool AudioBuffer_SetDecoder(FormatDecoder* decoder) {
         return false;
     }
 
+    /* Swapping the primary decoder invalidates any in-flight fade. */
+    crossfade_abort();
+
     // Clean up existing decoder
     if (g_buffer.decoder) {
         format_decoder_close(g_buffer.decoder);
@@ -532,6 +587,7 @@ bool AudioBuffer_SetDecoder(FormatDecoder* decoder) {
 }
 
 void AudioBuffer_ClearDecoder(void) {
+    crossfade_abort();
     if (g_buffer.decoder) {
         format_decoder_close(g_buffer.decoder);
         format_decoder_destroy(g_buffer.decoder);
@@ -576,6 +632,21 @@ bool AudioBuffer_ConsumeTrackChanged(void) {
         return true;
     }
     return false;
+}
+
+void AudioBuffer_SetCrossfadeFrames(uint32_t frames) {
+    if (frames > CROSSFADE_MAX_FRAMES) {
+        frames = CROSSFADE_MAX_FRAMES;
+    }
+    /* Atomic target; the producer snapshots it when a transition begins. A
+     * value of 0 disables crossfade and keeps the hard-cut gapless path. */
+    atomic_store_explicit(&g_buffer.crossfade.target_frames, frames,
+                          memory_order_relaxed);
+}
+
+uint32_t AudioBuffer_GetCrossfadeFrames(void) {
+    return atomic_load_explicit(&g_buffer.crossfade.target_frames,
+                                memory_order_relaxed);
 }
 
 static void reset_internal_state(void) {
@@ -637,6 +708,264 @@ static bool advance_to_next_track(void) {
     return true;
 }
 
+/*
+ * Downmix one decoded interleaved frame (any channel count, already validated
+ * <= 8) to a stereo float pair. Mirrors the per-frame mixing in fill_buffer so
+ * the gapless and crossfade paths share one definition.
+ */
+static inline void downmix_frame(const float* frame, uint32_t channels,
+                                 float* out_left, float* out_right) {
+    float left;
+    float right;
+    if (channels == 1U) {
+        left = frame[0];
+        right = frame[0];
+    } else if (channels == 2U) {
+        left = frame[0];
+        right = frame[1];
+    } else {
+        left = frame[0];
+        right = frame[1];
+        for (uint32_t ch = 2U; ch < channels; ch++) {
+            float sample = frame[ch];
+            left += sample;
+            right += sample;
+        }
+        float scale = 1.0f / (float)channels;
+        left *= scale;
+        right *= scale;
+    }
+    *out_left = left;
+    *out_right = right;
+}
+
+/* Clamp a stereo float pair to [-1,1], quantise to S16 and write it at the
+ * given frame offset of the destination buffer. */
+static inline void write_stereo_frame(size_t index, size_t frame_offset,
+                                      float left, float right) {
+    if (left > 1.0f) left = 1.0f;
+    if (left < -1.0f) left = -1.0f;
+    if (right > 1.0f) right = 1.0f;
+    if (right < -1.0f) right = -1.0f;
+
+    int16_t left_i = (int16_t)(left * 32767.0f);
+    int16_t right_i = (int16_t)(right * 32767.0f);
+    size_t out_index = frame_offset * AUDIO_OUT_CHANNELS;
+    g_buffer.data[index][out_index] = (uint16_t)left_i;
+    g_buffer.data[index][out_index + 1U] = (uint16_t)right_i;
+}
+
+/* Append one already-volume-scaled stereo frame to the crossfade tail ring so
+ * it is available as outgoing-track tail if the decoder hits EOF soon. Only
+ * worth maintaining while a fade length is armed. */
+static inline void tail_push(float left, float right) {
+    float* slot = &g_buffer.crossfade.tail[g_buffer.crossfade.tail_head * AUDIO_OUT_CHANNELS];
+    slot[0] = left;
+    slot[1] = right;
+    g_buffer.crossfade.tail_head =
+        (g_buffer.crossfade.tail_head + 1U) % CROSSFADE_MAX_FRAMES;
+    if (g_buffer.crossfade.tail_count < CROSSFADE_MAX_FRAMES) {
+        g_buffer.crossfade.tail_count++;
+    }
+}
+
+/*
+ * Read frame 'i' of the frozen outgoing tail window (0 == oldest of the window).
+ * The window of 'tail_window' frames is anchored at 'tail_anchor' (the ring
+ * index of its oldest frame), both captured when the fade began. Because the
+ * producer stops pushing to the ring for the duration of the fade, this window
+ * is stable and can be read by absolute offset with wrap-around - no copy, no
+ * second buffer. Out-of-range reads yield silence.
+ */
+static inline void tail_window_at(uint32_t i, float* left, float* right) {
+    if (i >= g_buffer.crossfade.tail_window) {
+        *left = 0.0f;
+        *right = 0.0f;
+        return;
+    }
+    size_t idx = (g_buffer.crossfade.tail_anchor + i) % CROSSFADE_MAX_FRAMES;
+    const float* slot = &g_buffer.crossfade.tail[idx * AUDIO_OUT_CHANNELS];
+    *left = slot[0];
+    *right = slot[1];
+}
+
+/* Discard the incoming decoder held for a fade, if any. */
+static void crossfade_release_incoming(void) {
+    if (g_buffer.crossfade.incoming) {
+        format_decoder_close(g_buffer.crossfade.incoming);
+        format_decoder_destroy(g_buffer.crossfade.incoming);
+        g_buffer.crossfade.incoming = NULL;
+    }
+}
+
+/*
+ * Tear down any in-flight fade and reset the producer-local crossfade state
+ * (incoming decoder, fade window, captured tail). Called whenever playback is
+ * flushed, the primary decoder is swapped, or the buffer is cleaned up - e.g. a
+ * Skip during a fade - so the second decoder never leaks and stale tail does
+ * not bleed into the next track. Does NOT clear the armed fade length, which is
+ * a persistent control setting. Producer-thread paths only.
+ */
+static void crossfade_abort(void) {
+    crossfade_release_incoming();
+    g_buffer.crossfade.in_progress = false;
+    g_buffer.crossfade.active_frames = 0U;
+    g_buffer.crossfade.pos = 0U;
+    g_buffer.crossfade.tail_count = 0U;
+    g_buffer.crossfade.tail_head = 0U;
+    g_buffer.crossfade.tail_anchor = 0U;
+    g_buffer.crossfade.tail_window = 0U;
+}
+
+/*
+ * Begin a crossfade after the outgoing decoder hit EOF. Pulls the incoming
+ * decoder from the next-track provider and arms the fade window. Returns true
+ * if a fade was started (incoming decoder installed, track-change published),
+ * false if there is no next track or no captured tail to fade against - in
+ * which case the caller falls back to the plain gapless swap / drain.
+ *
+ * NOTE: the next-track provider both advances the music library AND opens the
+ * decoder, so calling it here performs the same library advance the gapless
+ * path would. The fade then plays the incoming head while fading the captured
+ * outgoing tail; afterwards g_buffer.decoder is swapped to this incoming
+ * decoder and normal filling resumes.
+ */
+static bool crossfade_begin(uint32_t fade_frames) {
+    if (fade_frames == 0U || g_buffer.crossfade.tail_count == 0U) {
+        return false;
+    }
+    if (!g_buffer.next_track_provider) {
+        return false;
+    }
+
+    FormatDecoder* incoming = g_buffer.next_track_provider(g_buffer.next_track_user_data);
+    if (!incoming) {
+        return false;  // end of library: no fade, drain cleanly
+    }
+
+    uint32_t channels = format_decoder_get_channels(incoming);
+    if (channels == 0U) {
+        channels = AUDIO_OUT_CHANNELS;
+    }
+    if (channels > 8U) {
+        /* Cannot mix an unsupported layout; abandon the fade and let the plain
+         * gapless path take over by swapping straight to this decoder. */
+        if (g_buffer.decoder) {
+            format_decoder_close(g_buffer.decoder);
+            format_decoder_destroy(g_buffer.decoder);
+        }
+        g_buffer.decoder = incoming;
+        atomic_fetch_add_explicit(&g_buffer.track_change_count, 1U,
+                                  memory_order_relaxed);
+        return false;
+    }
+
+    /* Clamp the fade to however much outgoing tail we actually captured (a
+     * track shorter than the window simply gets a shorter fade). */
+    if (fade_frames > g_buffer.crossfade.tail_count) {
+        fade_frames = (uint32_t)g_buffer.crossfade.tail_count;
+    }
+
+    /* Freeze the outgoing-tail window: its oldest frame sits 'fade_frames' back
+     * from the current ring head. The producer stops pushing to the ring for
+     * the fade's duration, so this anchor stays valid and is read by absolute
+     * offset in crossfade_emit(). */
+    g_buffer.crossfade.tail_anchor =
+        (g_buffer.crossfade.tail_head + CROSSFADE_MAX_FRAMES - fade_frames)
+        % CROSSFADE_MAX_FRAMES;
+    g_buffer.crossfade.tail_window = fade_frames;
+
+    g_buffer.crossfade.incoming = incoming;
+    g_buffer.crossfade.active_frames = fade_frames;
+    g_buffer.crossfade.pos = 0U;
+    g_buffer.crossfade.in_progress = true;
+
+    /* Publish the transition now so the UI refreshes "Now Playing" at the
+     * point the incoming track becomes audible (start of the fade). */
+    atomic_fetch_add_explicit(&g_buffer.track_change_count, 1U,
+                              memory_order_relaxed);
+    return true;
+}
+
+/*
+ * Emit crossfade-mixed frames into the destination buffer starting at
+ * out_frame. Mixes the captured outgoing tail (faded out) with freshly decoded
+ * incoming-head frames (faded in) using an equal-power cos/sin curve:
+ *
+ *     t in [0,1]:  gain_out = cos(t * PI/2),  gain_in = sin(t * PI/2)
+ *     gain_out^2 + gain_in^2 == 1  ->  constant summed power, no mid-fade dip.
+ *
+ * Incoming frames are decoded one block at a time into 'scratch' and already
+ * have master volume applied (the tail was captured post-volume too, so both
+ * sides share the same gain). Writes up to 'max_frames' frames; returns the
+ * number written. Sets *fade_done when the window is exhausted. If the incoming
+ * decoder unexpectedly ends mid-fade, the fade is cut short and *fade_done set.
+ */
+static size_t crossfade_emit(size_t index, size_t out_frame, size_t max_frames,
+                             float gain, float* scratch, bool* fade_done) {
+    *fade_done = false;
+    size_t written = 0U;
+    uint32_t total = g_buffer.crossfade.active_frames;
+
+    uint32_t channels = format_decoder_get_channels(g_buffer.crossfade.incoming);
+    if (channels == 0U) {
+        channels = AUDIO_OUT_CHANNELS;
+    }
+
+    while (written < max_frames && g_buffer.crossfade.pos < total) {
+        size_t want = max_frames - written;
+        uint32_t remaining = total - g_buffer.crossfade.pos;
+        if (want > remaining) {
+            want = remaining;
+        }
+
+        size_t got = format_decoder_read(g_buffer.crossfade.incoming, scratch, want);
+        if (got == 0U) {
+            /* Incoming track is shorter than the fade window: end the fade
+             * early; the outgoing tail simply finishes faded out. */
+            *fade_done = true;
+            break;
+        }
+
+        for (size_t i = 0; i < got; i++) {
+            float in_l;
+            float in_r;
+            downmix_frame(&scratch[i * channels], channels, &in_l, &in_r);
+            in_l *= gain;
+            in_r *= gain;
+
+            /* Outgoing tail frame at this fade position (frozen window). */
+            float out_l;
+            float out_r;
+            tail_window_at(g_buffer.crossfade.pos, &out_l, &out_r);
+
+            /* Equal-power (constant energy) fade: gain_out=cos, gain_in=sin,
+             * so gain_out^2 + gain_in^2 == 1 and the mixed power stays flat. */
+            float t = (total > 1U)
+                          ? (float)g_buffer.crossfade.pos / (float)(total - 1U)
+                          : 1.0f;
+            float g_out = cosf(t * 1.57079632679f);
+            float g_in = sinf(t * 1.57079632679f);
+
+            float left = out_l * g_out + in_l * g_in;
+            float right = out_r * g_out + in_r * g_in;
+
+            /* Do NOT push to the tail ring during a fade: the frozen window
+             * anchored in crossfade_begin() must stay intact. Normal tail
+             * capture resumes once the incoming decoder becomes primary. */
+
+            write_stereo_frame(index, out_frame + written + i, left, right);
+            g_buffer.crossfade.pos++;
+        }
+        written += got;
+    }
+
+    if (g_buffer.crossfade.pos >= total) {
+        *fade_done = true;
+    }
+    return written;
+}
+
 static bool fill_buffer(size_t index) {
     printf("fill_buffer called for index %zu\n", index);
 
@@ -678,8 +1007,45 @@ static bool fill_buffer(size_t index) {
 
     static float decode_buffer[AUDIO_BUFFER_FRAMES * 8U];
 
+    /* Snapshot the armed fade length once per fill. While > 0 the producer
+     * captures a tail ring so it can crossfade on EOF; 0 keeps the existing
+     * hard-cut gapless behaviour with no tail bookkeeping. */
+    const uint32_t fade_frames = atomic_load_explicit(
+        &g_buffer.crossfade.target_frames, memory_order_relaxed);
+    const bool crossfade_armed = (fade_frames > 0U);
+
     printf("Using format decoder...\n");
     while (frames_read_total < AUDIO_BUFFER_FRAMES) {
+        /* If a crossfade is mid-flight, finish (or advance) its window before
+         * decoding any more of the incoming track normally. */
+        if (g_buffer.crossfade.in_progress) {
+            bool fade_done = false;
+            size_t emitted = crossfade_emit(index, frames_read_total,
+                                            AUDIO_BUFFER_FRAMES - frames_read_total,
+                                            gain, decode_buffer, &fade_done);
+            frames_read_total += emitted;
+            if (fade_done) {
+                /* Fade complete: promote the incoming decoder to the primary
+                 * decoder and resume normal filling from where the head left
+                 * off. The outgoing decoder was already closed in
+                 * crossfade_begin()'s provider call path; close nothing else. */
+                if (g_buffer.decoder) {
+                    format_decoder_close(g_buffer.decoder);
+                    format_decoder_destroy(g_buffer.decoder);
+                }
+                g_buffer.decoder = g_buffer.crossfade.incoming;
+                g_buffer.crossfade.incoming = NULL;
+                g_buffer.crossfade.in_progress = false;
+                g_buffer.crossfade.active_frames = 0U;
+                g_buffer.crossfade.pos = 0U;
+                printf("Crossfade complete; resuming normal fill\n");
+            }
+            if (emitted == 0U && !fade_done) {
+                break;  // could not make progress; avoid spinning
+            }
+            continue;
+        }
+
         // Channel count is re-read every iteration because a gapless transition
         // mid-fill can swap in a decoder with a different channel layout.
         uint32_t channels = format_decoder_get_channels(g_buffer.decoder);
@@ -696,10 +1062,14 @@ static bool fill_buffer(size_t index) {
         size_t frames_read = format_decoder_read(g_buffer.decoder, decode_buffer, frames_to_read);
 
         if (frames_read == 0) {
-            // Current decoder is exhausted. Try to advance to the next track and
-            // keep filling this same buffer for gapless playback. If there is no
-            // next track, fall through and zero-pad the remainder.
-            printf("Decoder EOF; attempting gapless advance\n");
+            // Current decoder is exhausted. With crossfade armed, overlap-mix the
+            // captured tail with the incoming head; otherwise fall back to the
+            // hard-cut gapless swap. If neither yields a next track, zero-pad.
+            printf("Decoder EOF; attempting transition\n");
+            if (crossfade_armed && crossfade_begin(fade_frames)) {
+                printf("Crossfade: started fade to next track\n");
+                continue;  // fade is now in_progress; handled at loop top
+            }
             if (advance_to_next_track()) {
                 printf("Gapless: advanced to next track, continuing fill\n");
                 continue;
@@ -709,42 +1079,21 @@ static bool fill_buffer(size_t index) {
         }
 
         for (size_t i = 0; i < frames_read; i++) {
-            float left = 0.0f;
-            float right = 0.0f;
-
-            if (channels == 1U) {
-                left = decode_buffer[i];
-                right = decode_buffer[i];
-            } else if (channels == 2U) {
-                left = decode_buffer[i * channels + 0U];
-                right = decode_buffer[i * channels + 1U];
-            } else {
-                left = decode_buffer[i * channels + 0U];
-                right = decode_buffer[i * channels + 1U];
-                for (uint32_t ch = 2U; ch < channels; ch++) {
-                    float sample = decode_buffer[i * channels + ch];
-                    left += sample;
-                    right += sample;
-                }
-                float scale = 1.0f / (float)channels;
-                left *= scale;
-                right *= scale;
-            }
+            float left;
+            float right;
+            downmix_frame(&decode_buffer[i * channels], channels, &left, &right);
 
             // Apply master volume in the float domain before clamping/quantising.
             left *= gain;
             right *= gain;
 
-            if (left > 1.0f) left = 1.0f;
-            if (left < -1.0f) left = -1.0f;
-            if (right > 1.0f) right = 1.0f;
-            if (right < -1.0f) right = -1.0f;
+            /* Capture the post-volume tail so a crossfade on the next EOF can
+             * fade this track out against the incoming head. */
+            if (crossfade_armed) {
+                tail_push(left, right);
+            }
 
-            int16_t left_i = (int16_t)(left * 32767.0f);
-            int16_t right_i = (int16_t)(right * 32767.0f);
-            size_t out_index = (frames_read_total + i) * AUDIO_OUT_CHANNELS;
-            g_buffer.data[index][out_index] = (uint16_t)left_i;
-            g_buffer.data[index][out_index + 1U] = (uint16_t)right_i;
+            write_stereo_frame(index, frames_read_total + i, left, right);
         }
 
         frames_read_total += frames_read;

@@ -21,6 +21,7 @@ typedef struct {
     EndOfPlaylistCallback playlist_callback;
     bool end_of_playlist;
     bool transition_pending;
+    uint16_t crossfade_ms;  // requested crossfade duration; 0 == disabled
 } AudioPipelineContext;
 
 static AudioPipelineContext g_pipeline;
@@ -31,6 +32,7 @@ static void configure_codec(uint32_t sample_rate, uint8_t bit_depth);
 static void update_next_track_status(void);
 static FormatDecoder* open_decoder_for_current_track(void);
 static FormatDecoder* gapless_next_track_provider(void* user_data);
+static void apply_crossfade_frames(void);
 
 bool AudioPipeline_Init(void) {
     printf("AudioPipeline_Init starting...\n");
@@ -289,6 +291,15 @@ bool AudioPipeline_Configure(const AudioPipelineConfig *config) {
     g_pipeline.config = *config;
     configure_codec(config->sample_rate, config->bit_depth);
 
+    /* Reconcile the buffer's fade window with the (boolean) config flag. The
+     * config carries no duration, so crossfade_ms remains the source of truth:
+     * disabling clears the window; enabling (re)applies whatever ms is set. */
+    if (!config->crossfade_enabled) {
+        AudioBuffer_SetCrossfadeFrames(0U);
+    } else {
+        apply_crossfade_frames();
+    }
+
     if (g_pipeline.state == PIPELINE_STATE_PLAYING) {
         ensure_buffer_ready();
     }
@@ -369,7 +380,37 @@ void AudioPipeline_UnregisterStateCallback(void) {
 void AudioPipeline_ProcessCrossfade(int16_t *buffer, size_t samples) {
     (void)buffer;
     (void)samples;
-    /* Crossfade is not implemented in the simplified pipeline. */
+    /*
+     * Crossfade mixing is performed inside the audio buffer producer
+     * (AudioBuffer fill path), where the outgoing track's decoded tail is
+     * overlap-mixed with the incoming track's head using an equal-power curve.
+     * This per-buffer hook is therefore a no-op; it is retained for API
+     * compatibility. Use AudioPipeline_SetCrossfade() to enable/configure.
+     */
+}
+
+/* Convert a crossfade duration in ms to a frame count at the current output
+ * sample rate and push it to the buffer producer. Re-applied whenever the
+ * duration or sample rate changes so the fade window tracks the active rate. */
+static void apply_crossfade_frames(void) {
+    uint32_t rate = g_pipeline.config.sample_rate;
+    if (rate == 0U) {
+        rate = SAMPLE_RATE;
+    }
+    /* frames = ms * rate / 1000, computed in 64-bit to avoid overflow. */
+    uint64_t frames = ((uint64_t)g_pipeline.crossfade_ms * (uint64_t)rate) / 1000ULL;
+    AudioBuffer_SetCrossfadeFrames((uint32_t)frames);
+}
+
+bool AudioPipeline_SetCrossfade(uint16_t milliseconds) {
+    g_pipeline.crossfade_ms = milliseconds;
+    g_pipeline.config.crossfade_enabled = (milliseconds > 0U);
+    apply_crossfade_frames();
+    return true;
+}
+
+uint16_t AudioPipeline_GetCrossfade(void) {
+    return g_pipeline.crossfade_ms;
 }
 
 bool AudioPipeline_Seek(size_t sample_position) {
@@ -393,6 +434,10 @@ bool AudioPipeline_ReconfigureFormat(uint32_t new_sample_rate, uint8_t new_bit_d
     g_pipeline.config.bit_depth = new_bit_depth;
     AudioBuffer_ConfigureSampleRate(new_sample_rate, new_sample_rate);
     AudioBuffer_ConfigureSampleFormat(new_bit_depth, false, true);
+
+    /* The crossfade window is stored in frames; re-derive it from the ms
+     * setting so a sample-rate change keeps the same wall-clock fade length. */
+    apply_crossfade_frames();
 
     if (!DMA_Reconfigure(new_sample_rate, new_bit_depth)) {
         return false;

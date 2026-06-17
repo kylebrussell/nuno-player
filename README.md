@@ -51,19 +51,34 @@ one-line append.
 - `--shot <file.bmp>` – render one frame of the current device and exit
   (headless preview capture)
 
-Current lineup: `ipod-1g`, `ipod-3g`, `ipod-4g`, `ipod-mini`, `ipod-photo`,
-`ipod-5g`, `ipod-nano`, `ipod-classic`, plus the mini anodized colour variants
-`ipod-mini-blue`, `ipod-mini-pink`, `ipod-mini-green`.
+Every body is laid out from the device's **real millimetre dimensions** through
+one global pixels-per-mm constant, so the generations come out at their true
+relative sizes: a nano is genuinely narrower and smaller than a classic, the
+nano 3G is short & wide, and the nano 4G/5G are tall & narrow with **portrait**
+screens. The screen footprint is the panel's real physical size, so it also
+serves as the UI's logical resolution and occupies its authentic fraction of
+the face (the early iPods wore big bezels; the 5G/classic and nano panels fill
+much more of the body).
+
+Current lineup:
+
+- Full-size: `ipod-1g`, `ipod-2g`, `ipod-3g`, `ipod-4g`, `ipod-photo`,
+  `ipod-5g`, `ipod-classic`
+- iPod mini: `ipod-mini`, plus the anodized colour variants `ipod-mini-blue`,
+  `ipod-mini-pink`, `ipod-mini-green`
+- iPod nano: `ipod-nano` (1G), `ipod-nano2g`, `ipod-nano3g` (short & wide),
+  `ipod-nano4g`, `ipod-nano5g` (portrait screens)
 
 Each profile carries its own palette and main-menu feature set, so the same
 engine renders each generation authentically:
 
 - **Themes** – monochrome panels (1G–4G, mini) keep the original inverted
-  selection bar; colour panels (photo, 5G, nano, classic) get a glossy blue
-  selection **gradient** and a subtly shaded title bar.
+  selection bar; colour panels (photo, 5G, classic, every nano) get a glossy
+  blue selection **gradient** and a subtly shaded title bar.
 - **Per-generation menus** – `Music`, `Settings` and `Now Playing` are
-  universal; `Photos` appears on colour models and `Videos` on the 5G/classic,
-  matching the real lineup. Feature flags live in `DeviceProfile.features`.
+  universal; `Photos` appears on the colour models and `Videos` on the
+  video-capable generations (5G, classic, nano 3G/4G/5G), matching the real
+  lineup. Feature flags live in `DeviceProfile.features`.
 - **Faceplate hook** – a profile may set `chassis.faceplateImage` to a bitmap
   path; the sim then blits that image (loaded once and cached) scaled to the
   canvas instead of the procedural body. All shipped profiles leave it unset and

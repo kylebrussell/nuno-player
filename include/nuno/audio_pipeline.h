@@ -140,15 +140,38 @@ void AudioPipeline_UnregisterStateCallback(void);
 
 /**
  * @brief Process crossfade between current and next track
- * 
+ *
  * This function handles the mixing of audio samples during track transitions
  * when crossfade is enabled. It should be called by the audio processing loop
  * for each buffer of samples.
- * 
+ *
  * @param buffer Pointer to the current audio buffer
  * @param samples Number of samples in the buffer
  */
 void AudioPipeline_ProcessCrossfade(int16_t* buffer, size_t samples);
+
+/**
+ * @brief Configure crossfade between consecutive tracks.
+ *
+ * When set to a non-zero duration, the tail of an ending track is overlap-mixed
+ * with the head of the next track over the given window using an equal-power
+ * (cos/sin) curve, instead of the default hard-cut gapless transition. The fade
+ * is performed by the audio buffer producer; the actual length is clamped to an
+ * internal maximum and to the length of a track shorter than the window.
+ *
+ * Passing 0 disables crossfade and restores the exact gapless behaviour, which
+ * is the default - nothing regresses unless crossfade is explicitly enabled.
+ *
+ * @param milliseconds Crossfade duration in ms (0 = disabled). Uses the
+ *                     currently configured sample rate to convert to frames.
+ * @return true (always succeeds; the value is clamped internally)
+ */
+bool AudioPipeline_SetCrossfade(uint16_t milliseconds);
+
+/**
+ * @brief Get the configured crossfade duration in milliseconds (0 = disabled).
+ */
+uint16_t AudioPipeline_GetCrossfade(void);
 
 /**
  * @brief Seek to a specific sample position in the audio stream

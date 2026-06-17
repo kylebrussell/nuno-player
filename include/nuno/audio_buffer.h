@@ -177,4 +177,26 @@ uint32_t AudioBuffer_GetTrackChangeCount(void);
  */
 bool AudioBuffer_ConsumeTrackChanged(void);
 
+/* ----------------------------------------------------------------------------
+ * Crossfade
+ *
+ * Crossfade is an opt-in extension of the gapless machinery. When enabled and
+ * the active decoder hits EOF, instead of an instant decoder swap the producer
+ * overlap-mixes the TAIL of the outgoing track (the last `fade` frames it
+ * already emitted, kept in a small producer-local ring) with the HEAD of the
+ * incoming track decoded from the next-track provider. The outgoing tail is
+ * faded out and the incoming head faded in over the fade window using an
+ * equal-power (cos/sin) curve, which keeps the summed energy roughly constant
+ * and avoids the mid-fade loudness dip a linear fade produces.
+ *
+ * Set the fade length in frames (at the output sample rate). 0 disables
+ * crossfade and restores the exact hard-cut gapless behaviour. The value is an
+ * atomic scalar so it may be set from a thread other than the producer; the
+ * producer snapshots it when a transition begins. The mixing, the second
+ * decoder and the tail ring are all producer-local, so no extra locking is
+ * needed beyond the existing single-writer-per-index invariant.
+ * -------------------------------------------------------------------------- */
+void AudioBuffer_SetCrossfadeFrames(uint32_t frames);
+uint32_t AudioBuffer_GetCrossfadeFrames(void);
+
 #endif /* NUNO_AUDIO_BUFFER_H */

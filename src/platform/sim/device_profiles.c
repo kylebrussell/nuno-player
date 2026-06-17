@@ -3,10 +3,20 @@
 #include <string.h>
 
 /*
- * Built-in iPod lineup. Each entry is described with a few high-level fields
- * (screen size, wheel type, body/theme palette); a shared layout pass computes
- * the chassis canvas size and wheel geometry so proportions stay consistent and
- * adding a new generation is a one-line append.
+ * Built-in iPod lineup. Each entry is described by its REAL physical
+ * dimensions (body W x H, screen W x H, click-wheel diameter — all in
+ * millimetres) plus a few high-level fields (colour model, wheel type,
+ * body/theme palette). A single layout pass scales every device through one
+ * global PIXELS-PER-MM constant, so the chassis canvas, screen footprint and
+ * wheel geometry all live in a consistent physical space: a nano comes out
+ * genuinely narrower and smaller than a classic, the nano 3G is short & wide,
+ * and the nano 4G/5G are tall & narrow with portrait screens — without any
+ * renderer change, because the renderer reads all geometry from the profile.
+ *
+ * Because the screen footprint is derived from the panel's real size, the
+ * pixel dimensions also serve as the UI's logical resolution; the menu
+ * renderer is fully runtime-adaptive (Display_GetWidth/Height + metrics), so
+ * each generation's screen occupies its authentic fraction of the face.
  */
 
 #define RGB(r, g, b)  ((NunoColor){ (r), (g), (b), 255 })
@@ -124,7 +134,7 @@ static void apply_tint(ChassisStyle *c, WheelLayout *w, NunoColor base) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Layout pass: derive canvas + wheel geometry from the screen size    */
+/* Layout pass: derive canvas + screen + wheel geometry from real mm    */
 /* ------------------------------------------------------------------ */
 
 static int clampi(int v, int lo, int hi) {
@@ -133,94 +143,136 @@ static int clampi(int v, int lo, int hi) {
     return v;
 }
 
-static DeviceProfile build(const char *id, const char *name, int year,
-                           int screenW, int screenH, DisplayColorModel colorModel,
-                           WheelType wheelType, ThemeKind themeKind, BodyKind body) {
+/*
+ * Global PIXELS-PER-MM. Every device is laid out in this one physical space so
+ * relative sizes come out true: a 40 mm nano body is genuinely narrower than a
+ * 61.8 mm classic body, the same way they are in real life. Tuned so the
+ * smallest panels (nano: ~1.5") still render legible bitmap text and the
+ * largest body (classic) fits a comfortable window after windowScale.
+ */
+#define PPMM 4.0f
+
+static int mm_to_px(float mm) {
+    return (int)(mm * PPMM + 0.5f);
+}
+
+/*
+ * Per-generation physical description. All distances are real-world
+ * millimetres; the layout pass below converts them to pixels through PPMM.
+ */
+typedef struct {
+    const char       *id;
+    const char       *name;
+    int               year;
+    float             bodyW_mm;     /* faceplate width                       */
+    float             bodyH_mm;     /* faceplate height                      */
+    float             screenW_mm;   /* active panel width  (footprint)       */
+    float             screenH_mm;   /* active panel height (footprint)       */
+    float             wheelDiam_mm; /* click-wheel / scroll-wheel diameter   */
+    DisplayColorModel colorModel;
+    WheelType         wheelType;
+    ThemeKind         themeKind;
+    BodyKind          body;
+    /* Authentic main-menu feature set for this generation. */
+    MenuFeatures      features;
+} DeviceSpec;
+
+/*
+ * Real click-wheel diameters are ~0.66-0.72x the body width on the full-size
+ * iPods and the mini, but the nano family used a proportionally smaller wheel
+ * relative to its narrow/short bodies. Diameters below are taken per family so
+ * the wheel sits believably on each face; the layout pass turns the diameter
+ * into outer/inner radii directly.
+ */
+static DeviceProfile build_spec(const DeviceSpec *d) {
     DeviceProfile p = {0};
-    p.id = id;
-    p.displayName = name;
-    p.year = year;
+    p.id = d->id;
+    p.displayName = d->name;
+    p.year = d->year;
 
-    p.screen.width = screenW;
+    int canvasW = mm_to_px(d->bodyW_mm);
+    int canvasH = mm_to_px(d->bodyH_mm);
+    int screenW = mm_to_px(d->screenW_mm);
+    int screenH = mm_to_px(d->screenH_mm);
+
+    p.screen.width  = screenW;
     p.screen.height = screenH;
-    p.screen.colorModel = colorModel;
+    p.screen.colorModel = d->colorModel;
 
-    /* Metrics: magnify the bitmap font on large panels so text stays legible. */
-    int fontScale = (screenH >= 220) ? 2 : 1;
+    /* The screen sits centred horizontally, below a realistic top bezel. The
+     * early iPods (and the mini) wore tall top bezels with the wheel filling
+     * the lower half; the 5G/classic and nano panels grew to nearly fill the
+     * upper face. The remaining vertical space below the screen houses the
+     * wheel. */
+    p.screen.originX = (canvasW - screenW) / 2;
+    p.screen.originY = clampi((canvasH - screenH) / 4, 10, mm_to_px(13.0f));
+
+    /* Metrics: magnify the bitmap font on tall panels so text stays legible.
+     * Keyed off the screen pixel height: small panels render 1x, large ones 2x. */
+    int fontScale = (screenH >= 150) ? 2 : 1;
     p.metrics.fontScale = fontScale;
     p.metrics.titleBarHeight = 16 * fontScale;
     p.metrics.itemHeight     = 16 * fontScale;
     p.metrics.textHeight     = 12 * fontScale;
     p.metrics.textMargin     = 4 * fontScale;
 
-    int marginX = clampi((screenW * 12) / 100, 16, 42);
-    int topMargin = clampi((screenH * 14) / 100, 16, 42);
-    p.screen.originX = marginX;
-    p.screen.originY = topMargin;
-
-    int canvasW = screenW + marginX * 2;
-
     /* A row of separate buttons (3G) sits between the screen and the wheel. */
-    int buttonBand = (wheelType == WHEEL_TOUCH_BUTTONS) ? 26 : 0;
-    int gap = clampi((screenH * 16) / 100, 14, 36) + buttonBand;
+    int buttonBand = (d->wheelType == WHEEL_TOUCH_BUTTONS) ? mm_to_px(7.0f) : 0;
 
-    int outerR = (canvasW * 42) / 100;
-    int innerR = (outerR * 36) / 100;
+    int outerR = mm_to_px(d->wheelDiam_mm * 0.5f);
+    int innerR = (int)(outerR * 0.34f + 0.5f);
 
-    p.wheel.type = wheelType;
+    /* Centre the wheel within the lower face: the band between the bottom of
+     * the screen (plus any 3G button row) and the bottom of the body. */
+    int screenBottom = p.screen.originY + screenH + buttonBand;
+    int lowerCenter = (screenBottom + canvasH) / 2;
+    /* Keep the whole wheel inside the body with a small bottom margin. */
+    int minCenter = screenBottom + outerR + mm_to_px(2.0f);
+    int maxCenter = canvasH - outerR - mm_to_px(3.0f);
+    int centerY = clampi(lowerCenter, minCenter, maxCenter);
+
+    p.wheel.type = d->wheelType;
     p.wheel.centerX = canvasW / 2;
-    p.wheel.centerY = topMargin + screenH + gap + outerR;
+    p.wheel.centerY = centerY;
     p.wheel.outerRadius = outerR;
     p.wheel.innerRadius = innerR;
-    p.wheel.buttonRowY = topMargin + screenH + buttonBand / 2 + 6;
+    p.wheel.buttonRowY = p.screen.originY + screenH + buttonBand / 2 + 4;
 
-    int bottomMargin = marginX;
-    p.chassis.canvasWidth = canvasW;
-    p.chassis.canvasHeight = p.wheel.centerY + outerR + bottomMargin;
-    p.chassis.windowScale = (canvasW <= 240) ? 3 : 2;
+    p.chassis.canvasWidth  = canvasW;
+    p.chassis.canvasHeight = canvasH;
+    /* Larger bodies are upscaled less so the live window stays a comfortable
+     * size; small nanos/minis get a bigger integer scale so they remain
+     * usable. The relative-scale montage renders at a common PPMM instead. */
+    p.chassis.windowScale = (canvasW <= 180) ? 4 : (canvasW <= 230 ? 3 : 2);
     p.chassis.faceplateImage = NULL;
 
     /*
      * High-fidelity body framing: the device floats inside the canvas over a
      * drop shadow, with rounded corners. Inset and radius scale with the body so
-     * small minis and large 5G/classic bodies keep believable proportions. The
-     * renderer falls back to these same defaults if left zero, but pinning them
-     * here keeps geometry consistent and lets per-gen tuning live in one place.
+     * small minis/nanos and large 5G/classic bodies keep believable proportions.
      */
-    p.chassis.bodyInset = clampi(canvasW / 24, 7, 18);
-    p.chassis.cornerRadius = clampi((canvasW * 9) / 100, 14, 40);
+    p.chassis.bodyInset = clampi(canvasW / 30, 5, 12);
+    p.chassis.cornerRadius = clampi((canvasW * 11) / 100, 12, 34);
 
     /* Neutral studio backdrop the device sits on. */
     p.chassis.backdropTop    = RGB(214, 216, 220);
     p.chassis.backdropBottom = RGB(176, 178, 184);
 
-    p.theme = make_theme(themeKind);
-    apply_body(&p.chassis, &p.wheel, body);
+    p.theme = make_theme(d->themeKind);
+    apply_body(&p.chassis, &p.wheel, d->body);
 
-    /*
-     * Main-menu features, grounded in the real lineup:
-     *  - Photos: colour panels only (iPod photo, 5G, nano, classic).
-     *  - Videos: the 5G introduced video; the classic kept it. The colour photo
-     *    and nano 1G had RGB screens but no video, so gate on a tall RGB panel
-     *    (>=240px high) which selects exactly the 5G and classic.
-     *  - Extras: present across every generation.
-     *  - Games: shipped as a sub-item of Extras on real iPods, so it is not a
-     *    top-level entry by default (the flag exists for future profiles).
-     */
-    p.features.photos = (colorModel == DISPLAY_COLOR_RGB);
-    p.features.videos = (colorModel == DISPLAY_COLOR_RGB) && (screenH >= 240);
-    p.features.extras = true;
-    p.features.games  = false;
-
+    p.features = d->features;
     return p;
 }
 
 /* Build a colour-variant iPod mini: identical geometry/screen/theme to the
  * silver mini, only the anodized body + wheel are re-tinted. */
-static DeviceProfile build_mini_variant(const char *id, const char *name,
-                                        NunoColor tint) {
-    DeviceProfile p = build(id, name, 2004, 138, 110, DISPLAY_COLOR_MONO_1BIT,
-                            WHEEL_CLICK, THEME_MONO, BODY_SILVER);
+static DeviceProfile build_mini_variant(const DeviceSpec *base, const char *id,
+                                        const char *name, NunoColor tint) {
+    DeviceSpec d = *base;
+    d.id = id;
+    d.name = name;
+    DeviceProfile p = build_spec(&d);
     apply_tint(&p.chassis, &p.wheel, tint);
     return p;
 }
@@ -229,27 +281,85 @@ static DeviceProfile build_mini_variant(const char *id, const char *name,
 /* Registry                                                           */
 /* ------------------------------------------------------------------ */
 
-#define PROFILE_COUNT 11
+/*
+ * Authentic main-menu feature sets, grounded in the real lineup:
+ *  - Photos: colour panels (iPod photo and every colour iPod after it).
+ *  - Videos: the 5G introduced video; the classic and the nano 3G/4G/5G kept
+ *    it. The early colour panels (photo, nano 1G/2G) had RGB screens but no
+ *    video.
+ *  - Extras: present across every generation (Clock/Contacts/Games etc.).
+ *  - Games: shipped as a sub-item of Extras on real iPods, so it is not a
+ *    top-level entry here.
+ */
+#define FEAT_MONO   ((MenuFeatures){ false, false, true, false })
+#define FEAT_PHOTOS ((MenuFeatures){ true,  false, true, false })
+#define FEAT_VIDEO  ((MenuFeatures){ true,  true,  true, false })
+
+/*
+ * The full click/scroll-wheel iPod lineage, described in real millimetres.
+ * Body W x H, screen W x H and wheel diameter are physical; the layout pass
+ * scales them all through one global PPMM so proportions stay true to life.
+ */
+static const DeviceSpec kSpecs[] = {
+    /* id              name                       year  bodyW  bodyH  scrW   scrH  wheel  colour                   wheel type           theme        body         features */
+    /* --- Full-size white-plastic lineage (~same body) --- */
+    { "ipod-1g",      "iPod 1G (2001)",          2001, 61.8f, 101.6f, 31.2f, 25.0f, 41.0f, DISPLAY_COLOR_MONO_1BIT, WHEEL_SCROLL,        THEME_MONO,  BODY_WHITE,  FEAT_MONO   },
+    { "ipod-2g",      "iPod 2G (2002)",          2002, 61.8f, 101.6f, 31.2f, 25.0f, 41.0f, DISPLAY_COLOR_MONO_1BIT, WHEEL_TOUCH,         THEME_MONO,  BODY_WHITE,  FEAT_MONO   },
+    { "ipod-3g",      "iPod 3G (2003)",          2003, 61.0f, 104.1f, 31.2f, 25.0f, 40.0f, DISPLAY_COLOR_MONO_1BIT, WHEEL_TOUCH_BUTTONS, THEME_MONO,  BODY_WHITE,  FEAT_MONO   },
+    { "ipod-4g",      "iPod 4G (2004)",          2004, 61.0f, 104.1f, 31.2f, 25.0f, 41.0f, DISPLAY_COLOR_MONO_1BIT, WHEEL_CLICK,         THEME_MONO,  BODY_WHITE,  FEAT_MONO   },
+    { "ipod-photo",   "iPod photo (2004)",       2004, 61.0f, 104.1f, 31.2f, 25.0f, 41.0f, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_WHITE,  FEAT_PHOTOS },
+    { "ipod-5g",      "iPod 5G Video (2005)",    2005, 61.8f, 103.5f, 50.8f, 38.1f, 41.0f, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_WHITE,  FEAT_VIDEO  },
+    { "ipod-classic", "iPod classic (2007)",     2007, 61.8f, 103.5f, 50.8f, 38.1f, 41.0f, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_SILVER, FEAT_VIDEO  },
+    /* --- iPod mini (anodized aluminium; smaller body) --- */
+    { "ipod-mini",    "iPod mini (2004)",        2004, 51.0f, 91.4f,  26.1f, 20.9f, 33.0f, DISPLAY_COLOR_MONO_1BIT, WHEEL_CLICK,         THEME_MONO,  BODY_SILVER, FEAT_MONO   },
+    /* --- iPod nano family --- */
+    { "ipod-nano",    "iPod nano 1G (2005)",     2005, 40.0f, 90.0f,  30.5f, 22.9f, 26.0f, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_BLACK,  FEAT_PHOTOS },
+    { "ipod-nano2g",  "iPod nano 2G (2006)",     2006, 40.0f, 90.0f,  30.5f, 22.9f, 26.0f, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_SILVER, FEAT_PHOTOS },
+    { "ipod-nano3g",  "iPod nano 3G (2007)",     2007, 52.3f, 69.8f,  40.6f, 30.5f, 31.0f, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_SILVER, FEAT_VIDEO  },
+    { "ipod-nano4g",  "iPod nano 4G (2008)",     2008, 38.7f, 90.7f,  30.5f, 40.6f, 25.0f, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_BLACK,  FEAT_VIDEO  },
+    { "ipod-nano5g",  "iPod nano 5G (2009)",     2009, 38.5f, 90.7f,  28.0f, 44.0f, 25.0f, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_BLACK,  FEAT_VIDEO  },
+};
+
+#define SPEC_COUNT (sizeof(kSpecs) / sizeof(kSpecs[0]))
+
+/* iPod mini anodized colour variants (same body, different dye). */
+typedef struct { const char *id; const char *name; NunoColor tint; } MiniVariant;
+static const MiniVariant kMiniVariants[] = {
+    { "ipod-mini-blue",  "iPod mini Blue (2004)",  RGB(150, 178, 196) },
+    { "ipod-mini-pink",  "iPod mini Pink (2004)",  RGB(214, 168, 178) },
+    { "ipod-mini-green", "iPod mini Green (2004)", RGB(176, 196, 150) },
+};
+
+#define MINI_VARIANT_COUNT (sizeof(kMiniVariants) / sizeof(kMiniVariants[0]))
+
+#define PROFILE_COUNT (SPEC_COUNT + MINI_VARIANT_COUNT)
 static DeviceProfile g_profiles[PROFILE_COUNT];
 static bool g_initialized = false;
+
+/* Locate the silver iPod mini spec, used as the base for the colour variants. */
+static const DeviceSpec *find_mini_spec(void) {
+    for (size_t i = 0; i < SPEC_COUNT; ++i) {
+        if (strcmp(kSpecs[i].id, "ipod-mini") == 0) {
+            return &kSpecs[i];
+        }
+    }
+    return &kSpecs[0];
+}
 
 static void ensure_init(void) {
     if (g_initialized) {
         return;
     }
     size_t i = 0;
-    g_profiles[i++] = build("ipod-1g",      "iPod 1G (2001)",        2001, 160, 128, DISPLAY_COLOR_MONO_1BIT, WHEEL_SCROLL,        THEME_MONO,  BODY_WHITE);
-    g_profiles[i++] = build("ipod-3g",      "iPod 3G (2003)",        2003, 160, 128, DISPLAY_COLOR_MONO_1BIT, WHEEL_TOUCH_BUTTONS, THEME_MONO,  BODY_WHITE);
-    g_profiles[i++] = build("ipod-4g",      "iPod 4G (2004)",        2004, 160, 128, DISPLAY_COLOR_MONO_1BIT, WHEEL_CLICK,         THEME_MONO,  BODY_WHITE);
-    g_profiles[i++] = build("ipod-mini",    "iPod mini (2004)",      2004, 138, 110, DISPLAY_COLOR_MONO_1BIT, WHEEL_CLICK,         THEME_MONO,  BODY_SILVER);
-    g_profiles[i++] = build("ipod-photo",   "iPod photo (2004)",     2004, 220, 176, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_WHITE);
-    g_profiles[i++] = build("ipod-5g",      "iPod 5G Video (2005)",  2005, 320, 240, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_WHITE);
-    g_profiles[i++] = build("ipod-nano",    "iPod nano 1G (2005)",   2005, 176, 132, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_BLACK);
-    g_profiles[i++] = build("ipod-classic", "iPod classic (2007)",   2007, 320, 240, DISPLAY_COLOR_RGB,       WHEEL_CLICK,         THEME_COLOR, BODY_SILVER);
-    /* iPod mini anodized colour variants (same body, different dye). */
-    g_profiles[i++] = build_mini_variant("ipod-mini-blue",  "iPod mini Blue (2004)",  RGB(150, 178, 196));
-    g_profiles[i++] = build_mini_variant("ipod-mini-pink",  "iPod mini Pink (2004)",  RGB(214, 168, 178));
-    g_profiles[i++] = build_mini_variant("ipod-mini-green", "iPod mini Green (2004)", RGB(176, 196, 150));
+    for (size_t s = 0; s < SPEC_COUNT; ++s) {
+        g_profiles[i++] = build_spec(&kSpecs[s]);
+    }
+    const DeviceSpec *mini = find_mini_spec();
+    for (size_t v = 0; v < MINI_VARIANT_COUNT; ++v) {
+        g_profiles[i++] = build_mini_variant(mini, kMiniVariants[v].id,
+                                             kMiniVariants[v].name,
+                                             kMiniVariants[v].tint);
+    }
     g_initialized = true;
 }
 
