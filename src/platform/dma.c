@@ -2,6 +2,7 @@
 #include "nuno/stm32h7xx_hal.h"
 #include "nuno/audio_buffer.h"
 #include "nuno/audio_i2s.h"
+#include "nuno/audio_task.h"
 
 #include <stdbool.h>
 
@@ -46,6 +47,14 @@ bool DMA_Init(void) {
     // Configure DMA interrupt
     HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
+
+    /* Start the audio producer task and register its ISR-safe wake. After this,
+     * the transfer-complete ISR's AudioBuffer_Done() only flips the buffer and
+     * wakes the producer (no decode/filesystem in the ISR); the producer task
+     * does the decode via AudioBuffer_Service(). */
+    if (!AudioTask_Start()) {
+        return false;
+    }
 
     return true;
 }
@@ -101,11 +110,13 @@ void DMA1_Stream0_IRQHandler(void) {
     HAL_DMA_IRQHandler(&hdma_i2s_tx);
 }
 
-// I2S Transfer Complete Callback
+// I2S Transfer Complete Callback (CONSUMER signal: a buffer finished playing).
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
     if (hi2s && hi2s->Instance == SPI2) {
-        dma_transfer_complete = true;
-        // Notify audio buffer that DMA transfer is complete
+        /* AudioBuffer_Done() flips the active buffer and wakes the audio
+         * producer task to refill the freed one. It does NOT decode here - a
+         * producer wake was registered in DMA_Init (AudioTask_Start), so the
+         * decode/filesystem work runs in the task, not this interrupt. */
         AudioBuffer_Done();
     }
 }

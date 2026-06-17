@@ -74,6 +74,34 @@ bool AudioBuffer_Done(void);
 void AudioBuffer_HalfDone(void);
 bool AudioBuffer_ProcessComplete(void);
 
+/*
+ * Producer / consumer decoupling
+ * ------------------------------
+ * Decoding (fill_buffer) must NOT run in the consumer context - on hardware the
+ * consumer is the DMA-complete ISR, and doing filesystem reads / decode there is
+ * a hard real-time violation; in the sim it is the SDL audio callback. To keep
+ * one model across both, register a producer "wake" callback. When one is set,
+ * AudioBuffer_Done() (consumer/ISR) only flips the active buffer, marks the
+ * just-freed buffer for refill, and calls the wake - it does NOT decode. A
+ * dedicated producer (a thread in the sim, a FreeRTOS task on hardware) then
+ * calls AudioBuffer_Service() to do the actual decode/fill off the audio path.
+ *
+ * The wake runs in the consumer/ISR context, so it must be ISR-safe and
+ * non-blocking (e.g. give a semaphore / signal a condvar). Pass NULL to restore
+ * inline synchronous filling inside Done() (the simple/back-compat path used by
+ * callers that have no separate producer).
+ *
+ * Priming (AudioBuffer_StartPlayback), seek and underrun recovery still fill
+ * synchronously: they run on the control thread before/around the audio path,
+ * not in the consumer/ISR.
+ */
+void AudioBuffer_SetProducerWake(void (*wake)(void));
+
+/* Producer entry point: refill any buffer the consumer freed via
+ * AudioBuffer_Done(). Call from the producer thread/task only. Decodes the next
+ * block(s); a no-op when nothing is pending, so spurious wakes are harmless. */
+void AudioBuffer_Service(void);
+
 void AudioBuffer_Update(void);
 bool AudioBuffer_IsUnderThreshold(void);
 void AudioBuffer_HandleUnderrun(void);

@@ -118,29 +118,19 @@ int main(void) {
 static void AudioProcessingTask(void *parameters) {
     (void)parameters; // Prevent unused parameter warning
 
-    // Start the first DMA transfer
+    /*
+     * Unified playback model: the DMA transfer-complete ISR calls
+     * AudioBuffer_Done() (flip + wake), and the audio producer task started by
+     * DMA_Init (AudioTask_Start) calls AudioBuffer_Service() to decode off the
+     * ISR. This task only kicks off the initial transfer; it must NOT poll and
+     * call AudioBuffer_ProcessComplete()/Done() (that would double-advance the
+     * buffer the ISR already flips, and re-introduce decode off the producer).
+     */
     if (!DMA_StartTransfer(AudioBuffer_GetBuffer(), AUDIO_BUFFER_SIZE)) {
         Error_Handler();
     }
 
-    for (;;) {
-        if (dma_transfer_complete) {
-            dma_transfer_complete = false;
-            
-            // Process completed transfer and prepare next buffer
-            if (!AudioBuffer_ProcessComplete()) {
-                Error_Handler();
-            }
-            
-            // Start next DMA transfer
-            if (!DMA_StartTransfer(AudioBuffer_GetBuffer(), AUDIO_BUFFER_SIZE)) {
-                Error_Handler();
-            }
-        }
-        
-        // Small delay to prevent task from hogging CPU
-        vTaskDelay(pdMS_TO_TICKS(1));
-    }
+    vTaskSuspend(NULL);  // playback is driven by the ISR + audio producer task
 }
 
 // The UI task integrates UI event processing and renders the UI at a fixed interval.

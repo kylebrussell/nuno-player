@@ -62,11 +62,14 @@ void SimAudio_Shutdown(void) {
     }
 
     AudioPipeline_Stop();
-    AudioBuffer_Cleanup();
 
-    // Clean up platform audio
+    // Stop the audio device + join the producer thread BEFORE resetting the
+    // buffer, so the producer is no longer in fill_buffer() when g_buffer is
+    // cleared by AudioBuffer_Cleanup().
     extern void platform_audio_cleanup(void);
     platform_audio_cleanup();
+
+    AudioBuffer_Cleanup();
 
     g_audio_initialised = false;
 }

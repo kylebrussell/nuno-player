@@ -93,12 +93,15 @@ if(NOT BUILD_SIM)
       src/platform/gpio.c
       src/platform/dma.c
       src/platform/audio_i2s.c
+      src/platform/audio_task.c
       src/platform/input/trackpad.c
   )
   target_include_directories(platform PUBLIC
       "${CMAKE_CURRENT_SOURCE_DIR}/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/src"
   )
+  # audio_task.c is a FreeRTOS producer task; it needs the kernel headers.
+  target_link_libraries(platform PUBLIC freertos_kernel)
 
   add_executable(nuno-player
       src/platform/main.c

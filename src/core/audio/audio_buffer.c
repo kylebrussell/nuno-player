@@ -70,6 +70,16 @@ typedef struct {
     bool initialised;
     _Atomic bool end_of_stream;
 
+    /*
+     * Producer decoupling (see the contract in audio_buffer.h). When
+     * producer_wake is non-NULL, AudioBuffer_Done() (consumer/ISR) marks the
+     * freed buffer in fill_pending and calls producer_wake instead of decoding
+     * inline; AudioBuffer_Service() (producer thread/task) performs the fill.
+     * fill_pending is a bitmask of buffer indices awaiting refill.
+     */
+    _Atomic uint32_t fill_pending;
+    void (*producer_wake)(void);
+
     bool next_track_available;
     size_t remaining_tracks;
 
@@ -272,18 +282,42 @@ bool AudioBuffer_Done(void) {
      * buffer was filled by a prior fill_buffer() whose writes are ordered
      * before this store, so the consumer's acquire load sees valid data. */
     atomic_store_explicit(&g_buffer.active, next_index, memory_order_release);
-
-    if (!fill_buffer(consumed_index)) {
-        /* The buffer we just refilled came up empty: no more audio. We do not
-         * fail here because the freshly-activated next_index buffer is still
-         * valid to play; end_of_stream is now set so the *following* Done()
-         * will report EOS once that buffer drains. */
-        set_state(BUFFER_STATE_PLAYING);
-        return true;
-    }
-
     set_state(BUFFER_STATE_PLAYING);
+
+    if (g_buffer.producer_wake) {
+        /* Decoupled producer path (the only safe option in an ISR / audio
+         * callback): mark the just-freed buffer and wake the producer to refill
+         * it off the audio path. Decode does NOT happen here. */
+        atomic_fetch_or_explicit(&g_buffer.fill_pending,
+                                 (uint32_t)(1U << consumed_index),
+                                 memory_order_relaxed);
+        g_buffer.producer_wake();
+    } else {
+        /* No producer registered: refill inline (synchronous fallback). If it
+         * comes up empty, end_of_stream is now set so the following Done() will
+         * report EOS once the freshly-activated buffer drains. */
+        (void)fill_buffer(consumed_index);
+    }
     return true;
+}
+
+void AudioBuffer_SetProducerWake(void (*wake)(void)) {
+    g_buffer.producer_wake = wake;
+}
+
+void AudioBuffer_Service(void) {
+    if (!g_buffer.initialised) {
+        return;
+    }
+    /* Claim and clear the pending set atomically so a Done() concurrent with
+     * this fill can re-arm the next round without losing a request. */
+    uint32_t pending = atomic_exchange_explicit(&g_buffer.fill_pending, 0U,
+                                                memory_order_relaxed);
+    for (size_t i = 0; i < DMA_BUFFER_COUNT; i++) {
+        if (pending & (1U << i)) {
+            (void)fill_buffer(i);
+        }
+    }
 }
 
 void AudioBuffer_HalfDone(void) {
@@ -650,7 +684,12 @@ uint32_t AudioBuffer_GetCrossfadeFrames(void) {
 }
 
 static void reset_internal_state(void) {
+    /* The producer wake is a platform binding, not buffer state - keep it across
+     * resets (Init/Cleanup/Flush) so the producer stays wired. fill_pending is
+     * cleared by the memset, which is what we want. */
+    void (*saved_wake)(void) = g_buffer.producer_wake;
     memset(&g_buffer, 0, sizeof(g_buffer));
+    g_buffer.producer_wake = saved_wake;
     g_buffer.low_threshold = AUDIO_BUFFER_LOW_WATER_MARK;
     g_buffer.high_threshold = AUDIO_BUFFER_FRAMES;
     g_buffer.read_cfg.min_bytes = AUDIO_BUFFER_BYTES / 4U;
@@ -967,13 +1006,10 @@ static size_t crossfade_emit(size_t index, size_t out_frame, size_t max_frames,
 }
 
 static bool fill_buffer(size_t index) {
-    printf("fill_buffer called for index %zu\n", index);
-
     /* Snapshot the master-volume gain once per block (ramped toward target). */
     const float gain = advance_volume_gain();
 
     if (!g_buffer.decoder) {
-        printf("No decoder available, using fallback\n");
         // Fallback to raw data reading if no decoder
         size_t bytes_read = FileSystem_ReadAudioData(g_buffer.data[index], AUDIO_BUFFER_BYTES);
         size_t samples_read = bytes_read / sizeof(uint16_t);
@@ -998,7 +1034,6 @@ static bool fill_buffer(size_t index) {
         atomic_store_explicit(&g_buffer.valid_frames[index], frames_read,
                               memory_order_relaxed);
         g_buffer.stats.total_samples += frames_read;
-        printf("Fallback read: %zu frames\n", frames_read);
         return frames_read > 0U;
     }
 
@@ -1014,7 +1049,6 @@ static bool fill_buffer(size_t index) {
         &g_buffer.crossfade.target_frames, memory_order_relaxed);
     const bool crossfade_armed = (fade_frames > 0U);
 
-    printf("Using format decoder...\n");
     while (frames_read_total < AUDIO_BUFFER_FRAMES) {
         /* If a crossfade is mid-flight, finish (or advance) its window before
          * decoding any more of the incoming track normally. */
@@ -1097,7 +1131,6 @@ static bool fill_buffer(size_t index) {
         }
 
         frames_read_total += frames_read;
-        printf("Read %zu frames, total %zu\n", frames_read, frames_read_total);
     }
 
     if (frames_read_total < AUDIO_BUFFER_FRAMES) {
@@ -1113,7 +1146,6 @@ static bool fill_buffer(size_t index) {
     atomic_store_explicit(&g_buffer.valid_frames[index], frames_read_total,
                           memory_order_relaxed);
     g_buffer.stats.total_samples += frames_read_total;
-    printf("Buffer filled with %zu frames\n", frames_read_total);
     return frames_read_total > 0U;
 }
 

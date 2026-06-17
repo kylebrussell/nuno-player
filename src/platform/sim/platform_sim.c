@@ -10,7 +10,62 @@ static SDL_AudioSpec g_audio_spec;
 static bool g_audio_initialised = false;
 static size_t g_buffer_offset_samples = 0;  // how many samples consumed in current buffer
 
+/*
+ * Decode happens off the audio path. The SDL audio callback (consumer) only
+ * copies ready PCM and, via AudioBuffer_Done() -> producer_wake(), posts this
+ * semaphore; the producer thread does the decode in AudioBuffer_Service(). This
+ * mirrors the intended hardware model (DMA-complete ISR posts a semaphore, a
+ * FreeRTOS task decodes) so the two platforms share one playback model.
+ */
+static SDL_Thread *g_producer_thread = NULL;
+static SDL_sem *g_producer_sem = NULL;
+static volatile bool g_producer_running = false;
+
 static void audio_callback(void* userdata, Uint8* stream, int len);
+
+/* Consumer/ISR context: just signal the producer. No decode here. */
+static void producer_wake(void) {
+    if (g_producer_sem) {
+        SDL_SemPost(g_producer_sem);
+    }
+}
+
+static int producer_thread_main(void* arg) {
+    (void)arg;
+    while (g_producer_running) {
+        SDL_SemWait(g_producer_sem);
+        if (!g_producer_running) {
+            break;
+        }
+        AudioBuffer_Service();
+    }
+    return 0;
+}
+
+static void start_producer(void) {
+    if (g_producer_thread) {
+        return;
+    }
+    g_producer_sem = SDL_CreateSemaphore(0);
+    g_producer_running = true;
+    g_producer_thread = SDL_CreateThread(producer_thread_main, "nuno-audio-producer", NULL);
+    AudioBuffer_SetProducerWake(producer_wake);
+}
+
+static void stop_producer(void) {
+    if (!g_producer_thread) {
+        return;
+    }
+    AudioBuffer_SetProducerWake(NULL);
+    g_producer_running = false;
+    SDL_SemPost(g_producer_sem);  // wake it so it can observe the stop flag
+    SDL_WaitThread(g_producer_thread, NULL);
+    g_producer_thread = NULL;
+    if (g_producer_sem) {
+        SDL_DestroySemaphore(g_producer_sem);
+        g_producer_sem = NULL;
+    }
+}
 
 static bool open_audio_device(uint32_t sample_rate) {
     SDL_AudioSpec want, have;
@@ -116,7 +171,11 @@ bool DMA_Init(void) {
     }
 
     g_buffer_offset_samples = 0;
-    return open_audio_device(44100U);
+    if (!open_audio_device(44100U)) {
+        return false;
+    }
+    start_producer();
+    return true;
 }
 
 bool DMA_Reconfigure(uint32_t sample_rate, uint8_t bit_depth) {
@@ -180,9 +239,14 @@ void platform_delay_ms(uint32_t ms) {
 }
 
 void platform_audio_cleanup(void) {
+    /* Close the device first so the consumer callback stops, then join the
+     * producer thread. The caller (SimAudio_Shutdown) invokes this BEFORE
+     * AudioBuffer_Cleanup(), so the producer is no longer touching g_buffer when
+     * the buffer state is reset. */
     if (g_audio_initialised) {
         SDL_CloseAudioDevice(g_audio_device);
         g_audio_device = 0;
         g_audio_initialised = false;
     }
+    stop_producer();
 }
