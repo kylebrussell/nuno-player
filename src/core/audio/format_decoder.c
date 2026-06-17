@@ -5,6 +5,28 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * Per-format decoder backend vtable.
+ *
+ * Format dispatch is polymorphic: format_decoder_open() picks a backend from
+ * the detected format and stores it on the decoder. The public read/seek/
+ * close/get_* entry points are thin dispatchers that call through this table,
+ * so adding a new format means adding a backend + a detect_audio_format() case
+ * rather than touching a switch in every function.
+ *
+ * Backends currently share the one FormatDecoder struct below; each backend
+ * only touches its own fields. open() returns true on success and is expected
+ * to have set last_error on failure.
+ */
+typedef struct DecoderBackend {
+    bool     (*open)(FormatDecoder* decoder);
+    size_t   (*read)(FormatDecoder* decoder, float* buffer, size_t frames);
+    void     (*seek)(FormatDecoder* decoder, size_t frame_position);
+    void     (*close)(FormatDecoder* decoder);
+    uint32_t (*get_channels)(const FormatDecoder* decoder);
+    uint32_t (*get_sample_rate)(const FormatDecoder* decoder);
+} DecoderBackend;
+
 struct FormatDecoder {
     mp3dec_t mp3d;
     mp3dec_frame_info_t frame_info;
@@ -14,6 +36,9 @@ struct FormatDecoder {
     bool initialized;
     enum FormatDecoderError last_error;
     void* format_specific_data;  // For format-specific decoder state
+
+    // Selected per-format backend (NULL until format_decoder_open succeeds)
+    const DecoderBackend* backend;
 
     // MP3-specific data
     FILE* file;
@@ -57,6 +82,9 @@ static void flac_metadata_callback(const FLAC__StreamDecoder* decoder,
 static void flac_error_callback(const FLAC__StreamDecoder* decoder,
                                 FLAC__StreamDecoderErrorStatus status,
                                 void* client_data);
+
+// Per-format backend selection (defined at end of file)
+static const DecoderBackend* backend_for_format(enum AudioFormatType format_type);
 
 // Audio format detection
 enum FormatDecoderError detect_audio_format(const uint8_t* header, size_t size, AudioFormatInfo* info) {
@@ -212,6 +240,7 @@ FormatDecoder* format_decoder_create(void) {
     decoder->last_error = FD_ERROR_NONE;
     decoder->format_info.format_type = AUDIO_FORMAT_UNKNOWN;
     decoder->format_specific_data = NULL;
+    decoder->backend = NULL;
     
     // Initialize with default configuration
     memcpy(&decoder->config, &default_config, sizeof(DecoderConfig));
@@ -273,48 +302,50 @@ bool format_decoder_open(FormatDecoder* decoder, const char* filepath) {
     // Rewind after detection so decoding starts from the beginning
     fseek(decoder->file, 0, SEEK_SET);
 
-    switch (decoder->format_info.format_type) {
-        case AUDIO_FORMAT_MP3:
-            // Initialize MP3 decoder
-            mp3dec_init(&decoder->mp3d);
-
-            // Allocate buffer for frame reading
-            decoder->buffer_size = 8192;
-            decoder->buffer = (uint8_t*)malloc(decoder->buffer_size);
-            if (!decoder->buffer) {
-                decoder->last_error = FD_ERROR_MEMORY;
-                fclose(decoder->file);
-                decoder->file = NULL;
-                return false;
-            }
-
-            decoder->buffer_pos = 0;
-            decoder->buffer_len = 0;
-            decoder->pcm_size = 0;
-            decoder->pcm_pos = 0;
-
-            // Read first frame to get format info
-            if (!read_next_frame(decoder)) {
-                format_decoder_close(decoder);
-                return false;
-            }
-
-            decoder->initialized = true;
-            return true;
-
-        case AUDIO_FORMAT_FLAC:
-            if (!init_flac_decoder(decoder)) {
-                format_decoder_close(decoder);
-                return false;
-            }
-            decoder->initialized = true;
-            return true;
-
-        default:
-            decoder->last_error = FD_ERROR_INVALID_FORMAT;
-            format_decoder_close(decoder);
-            return false;
+    // Select the polymorphic backend for the detected format.
+    decoder->backend = backend_for_format(decoder->format_info.format_type);
+    if (!decoder->backend) {
+        decoder->last_error = FD_ERROR_INVALID_FORMAT;
+        format_decoder_close(decoder);
+        return false;
     }
+
+    if (!decoder->backend->open(decoder)) {
+        format_decoder_close(decoder);
+        return false;
+    }
+
+    decoder->initialized = true;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// MP3 backend (minimp3)
+// ---------------------------------------------------------------------------
+
+static bool mp3_backend_open(FormatDecoder* decoder) {
+    // Initialize MP3 decoder
+    mp3dec_init(&decoder->mp3d);
+
+    // Allocate buffer for frame reading
+    decoder->buffer_size = 8192;
+    decoder->buffer = (uint8_t*)malloc(decoder->buffer_size);
+    if (!decoder->buffer) {
+        decoder->last_error = FD_ERROR_MEMORY;
+        return false;
+    }
+
+    decoder->buffer_pos = 0;
+    decoder->buffer_len = 0;
+    decoder->pcm_size = 0;
+    decoder->pcm_pos = 0;
+
+    // Read first frame to get format info
+    if (!read_next_frame(decoder)) {
+        return false;
+    }
+
+    return true;
 }
 
 static bool read_next_frame(FormatDecoder* decoder) {
@@ -549,104 +580,199 @@ static bool init_flac_decoder(FormatDecoder* decoder) {
     return true;
 }
 
-size_t format_decoder_read(FormatDecoder* decoder, float* buffer, size_t frames) {
-    if (!decoder || !decoder->initialized || !buffer) return 0;
+static bool flac_backend_open(FormatDecoder* decoder) {
+    return init_flac_decoder(decoder);
+}
 
+static size_t mp3_backend_read(FormatDecoder* decoder, float* buffer, size_t frames) {
     size_t frames_read = 0;
 
-    switch (decoder->format_info.format_type) {
-        case AUDIO_FORMAT_MP3:
-            while (frames_read < frames) {
-                // If we have decoded PCM available, copy it
-                if (decoder->pcm_pos < decoder->pcm_size) {
-                    uint32_t channels = decoder->frame_info.channels ? (uint32_t)decoder->frame_info.channels : 2U;
-                    size_t bytes_per_frame = (size_t)channels * sizeof(int16_t);
-                    size_t bytes_available = decoder->pcm_size - decoder->pcm_pos;
-                    size_t bytes_needed = (frames - frames_read) * bytes_per_frame;
-                    if (bytes_needed > bytes_available) {
-                        bytes_needed = bytes_available;
-                    }
-
-                    size_t samples_to_copy = bytes_needed / sizeof(int16_t);
-                    int16_t* int_buffer = (int16_t*)(decoder->pcm_buffer + decoder->pcm_pos);
-                    for (size_t i = 0; i < samples_to_copy; i++) {
-                        buffer[frames_read * channels + i] = int_buffer[i] / 32768.0f;
-                    }
-
-                    decoder->pcm_pos += bytes_needed;
-                    frames_read += bytes_needed / bytes_per_frame;
-                    if (frames_read >= frames) {
-                        break;
-                    }
-                }
-
-                // Need to decode next frame into PCM buffer
-                if (!read_next_frame(decoder)) {
-                    break; // End of file
-                }
+    while (frames_read < frames) {
+        // If we have decoded PCM available, copy it
+        if (decoder->pcm_pos < decoder->pcm_size) {
+            uint32_t channels = decoder->frame_info.channels ? (uint32_t)decoder->frame_info.channels : 2U;
+            size_t bytes_per_frame = (size_t)channels * sizeof(int16_t);
+            size_t bytes_available = decoder->pcm_size - decoder->pcm_pos;
+            size_t bytes_needed = (frames - frames_read) * bytes_per_frame;
+            if (bytes_needed > bytes_available) {
+                bytes_needed = bytes_available;
             }
-            break;
 
-        case AUDIO_FORMAT_FLAC: {
-            uint32_t channels = decoder->flac_channels ? decoder->flac_channels : 2U;
-            while (frames_read < frames) {
-                size_t samples_available = (decoder->flac_samples > decoder->flac_pos)
-                    ? (decoder->flac_samples - decoder->flac_pos)
-                    : 0U;
-                size_t frames_available = samples_available / channels;
-                if (frames_available > 0) {
-                    size_t frames_to_copy = frames - frames_read;
-                    if (frames_to_copy > frames_available) {
-                        frames_to_copy = frames_available;
-                    }
-                    size_t samples_to_copy = frames_to_copy * channels;
-                    memcpy(&buffer[frames_read * channels],
-                           &decoder->flac_buffer[decoder->flac_pos],
-                           samples_to_copy * sizeof(float));
-                    decoder->flac_pos += samples_to_copy;
-                    frames_read += frames_to_copy;
-                    if (decoder->flac_pos >= decoder->flac_samples) {
-                        decoder->flac_pos = 0;
-                        decoder->flac_samples = 0;
-                    }
-                    continue;
-                }
-
-                if (decoder->flac_eof) {
-                    break;
-                }
-
-                if (!FLAC__stream_decoder_process_single(decoder->flac_decoder)) {
-                    decoder->last_error = FD_ERROR_DECODE;
-                    break;
-                }
-
-                if (FLAC__stream_decoder_get_state(decoder->flac_decoder) ==
-                    FLAC__STREAM_DECODER_END_OF_STREAM) {
-                    decoder->flac_eof = true;
-                }
+            size_t samples_to_copy = bytes_needed / sizeof(int16_t);
+            int16_t* int_buffer = (int16_t*)(decoder->pcm_buffer + decoder->pcm_pos);
+            for (size_t i = 0; i < samples_to_copy; i++) {
+                buffer[frames_read * channels + i] = int_buffer[i] / 32768.0f;
             }
+
+            decoder->pcm_pos += bytes_needed;
+            frames_read += bytes_needed / bytes_per_frame;
+            if (frames_read >= frames) {
+                break;
+            }
+        }
+
+        // Need to decode next frame into PCM buffer
+        if (!read_next_frame(decoder)) {
+            break; // End of file
+        }
+    }
+
+    return frames_read;
+}
+
+static size_t flac_backend_read(FormatDecoder* decoder, float* buffer, size_t frames) {
+    size_t frames_read = 0;
+    uint32_t channels = decoder->flac_channels ? decoder->flac_channels : 2U;
+
+    while (frames_read < frames) {
+        size_t samples_available = (decoder->flac_samples > decoder->flac_pos)
+            ? (decoder->flac_samples - decoder->flac_pos)
+            : 0U;
+        size_t frames_available = samples_available / channels;
+        if (frames_available > 0) {
+            size_t frames_to_copy = frames - frames_read;
+            if (frames_to_copy > frames_available) {
+                frames_to_copy = frames_available;
+            }
+            size_t samples_to_copy = frames_to_copy * channels;
+            memcpy(&buffer[frames_read * channels],
+                   &decoder->flac_buffer[decoder->flac_pos],
+                   samples_to_copy * sizeof(float));
+            decoder->flac_pos += samples_to_copy;
+            frames_read += frames_to_copy;
+            if (decoder->flac_pos >= decoder->flac_samples) {
+                decoder->flac_pos = 0;
+                decoder->flac_samples = 0;
+            }
+            continue;
+        }
+
+        if (decoder->flac_eof) {
             break;
         }
 
-        default:
+        if (!FLAC__stream_decoder_process_single(decoder->flac_decoder)) {
+            decoder->last_error = FD_ERROR_DECODE;
             break;
+        }
+
+        if (FLAC__stream_decoder_get_state(decoder->flac_decoder) ==
+            FLAC__STREAM_DECODER_END_OF_STREAM) {
+            decoder->flac_eof = true;
+        }
     }
+
+    return frames_read;
+}
+
+size_t format_decoder_read(FormatDecoder* decoder, float* buffer, size_t frames) {
+    if (!decoder || !decoder->initialized || !buffer || !decoder->backend) return 0;
+
+    size_t frames_read = decoder->backend->read(decoder, buffer, frames);
 
     decoder->position += frames_read;
     return frames_read;
 }
 
+static void mp3_backend_seek(FormatDecoder* decoder, size_t frame_position) {
+    if (!decoder->file) {
+        decoder->last_error = FD_ERROR_FILE_READ;
+        return;
+    }
+
+    // Capture the current read offset (bytes consumed to reach decoder->position
+    // frames) BEFORE we disturb the file pointer, so we can calibrate an
+    // average bytes-per-frame for the approximate seek below.
+    long current_offset = ftell(decoder->file);
+
+    // Discard any decoded PCM and reset the minimp3 frame state so the next
+    // read decodes from a fresh position rather than from the stale buffer.
+    mp3dec_init(&decoder->mp3d);
+    decoder->buffer_pos = 0;
+    decoder->buffer_len = 0;
+    decoder->pcm_size = 0;
+    decoder->pcm_pos = 0;
+
+    if (frame_position == 0) {
+        // Seek-to-0 (restart) is EXACT: rewind and re-prime the first frame so
+        // format info / channel counts stay valid for subsequent reads.
+        if (fseek(decoder->file, 0, SEEK_SET) != 0) {
+            decoder->last_error = FD_ERROR_FILE_READ;
+            return;
+        }
+        if (!read_next_frame(decoder)) {
+            decoder->last_error = FD_ERROR_DECODE;
+        }
+        return;
+    }
+
+    // APPROXIMATE byte-offset seek for arbitrary targets.
+    //
+    // minimp3 exposes no sample-accurate seek and this decoder keeps no frame
+    // index, so we estimate a byte offset and let read_next_frame() resync to
+    // the next valid frame header. Two estimators, best-effort:
+    //   1. If we have already decoded some frames, use the average
+    //      bytes-per-frame observed so far (current_offset / position).
+    //   2. Otherwise fall back to whole-file proportional placement.
+    // This is fine for scrubbing but is NOT sample-accurate (especially VBR).
+    // TODO: parse the Xing/VBRI TOC or build a frame index for accurate seek.
+    long file_size = 0;
+    if (fseek(decoder->file, 0, SEEK_END) == 0) {
+        file_size = ftell(decoder->file);
+    }
+
+    long byte_offset = 0;
+    if (current_offset > 0 && decoder->position > 0) {
+        double bytes_per_frame = (double)current_offset / (double)decoder->position;
+        byte_offset = (long)(bytes_per_frame * (double)frame_position);
+    } else if (file_size > 0) {
+        // No calibration data: assume CBR-ish placement against a nominal frame
+        // length (1152 samples/frame for MPEG-1 Layer III).
+        const double MP3_SAMPLES_PER_FRAME = 1152.0;
+        double approx_frame_bytes =
+            (decoder->frame_info.frame_bytes > 0) ? (double)decoder->frame_info.frame_bytes : 417.0;
+        byte_offset = (long)((double)frame_position / MP3_SAMPLES_PER_FRAME * approx_frame_bytes);
+    }
+
+    if (byte_offset < 0) {
+        byte_offset = 0;
+    }
+    if (file_size > 0 && byte_offset > file_size) {
+        byte_offset = file_size;
+    }
+
+    if (fseek(decoder->file, byte_offset, SEEK_SET) != 0) {
+        decoder->last_error = FD_ERROR_FILE_READ;
+        return;
+    }
+
+    // Prime the next decodable frame from the new offset. read_next_frame()
+    // resynchronises to the next valid MP3 frame header.
+    if (!read_next_frame(decoder)) {
+        decoder->last_error = FD_ERROR_DECODE;
+    }
+}
+
+static void flac_backend_seek(FormatDecoder* decoder, size_t frame_position) {
+    if (!decoder->flac_decoder) {
+        return;
+    }
+    decoder->flac_samples = 0;
+    decoder->flac_pos = 0;
+    decoder->flac_eof = false;
+    if (!FLAC__stream_decoder_seek_absolute(decoder->flac_decoder, (FLAC__uint64)frame_position)) {
+        decoder->last_error = FD_ERROR_DECODE;
+    }
+}
+
 void format_decoder_seek(FormatDecoder* decoder, size_t frame_position) {
-    if (!decoder || !decoder->initialized) return;
+    if (!decoder || !decoder->initialized || !decoder->backend) return;
 
     decoder->last_error = FD_ERROR_NONE;
 
-    // For now, we don't support seeking - just reset to beginning
-    // This could be improved with proper seeking implementation
     size_t target_position = frame_position;
 
-    // Apply seeking behavior based on configuration
+    // Apply seeking behavior based on configuration (format-agnostic policy).
     switch (decoder->config.seeking_behavior) {
         case SEEK_ACCURATE:
             target_position = frame_position;
@@ -667,35 +793,14 @@ void format_decoder_seek(FormatDecoder* decoder, size_t frame_position) {
             break;
     }
 
-    decoder->position = target_position;
+    // Dispatch the actual repositioning to the backend.
+    decoder->backend->seek(decoder, target_position);
 
-    if (decoder->format_info.format_type == AUDIO_FORMAT_FLAC && decoder->flac_decoder) {
-        decoder->flac_samples = 0;
-        decoder->flac_pos = 0;
-        decoder->flac_eof = false;
-        if (!FLAC__stream_decoder_seek_absolute(decoder->flac_decoder, (FLAC__uint64)target_position)) {
-            decoder->last_error = FD_ERROR_DECODE;
-        }
-    }
+    // Keep the public position in sync with the requested target.
+    decoder->position = target_position;
 }
 
-void format_decoder_close(FormatDecoder* decoder) {
-    if (!decoder) return;
-
-    if (decoder->flac_decoder) {
-        if (FLAC__stream_decoder_get_state(decoder->flac_decoder) !=
-            FLAC__STREAM_DECODER_UNINITIALIZED) {
-            (void)FLAC__stream_decoder_finish(decoder->flac_decoder);
-        }
-        FLAC__stream_decoder_delete(decoder->flac_decoder);
-        decoder->flac_decoder = NULL;
-    }
-
-    if (decoder->file) {
-        fclose(decoder->file);
-        decoder->file = NULL;
-    }
-
+static void mp3_backend_close(FormatDecoder* decoder) {
     if (decoder->buffer) {
         free(decoder->buffer);
         decoder->buffer = NULL;
@@ -707,6 +812,19 @@ void format_decoder_close(FormatDecoder* decoder) {
         decoder->pcm_capacity = 0;
         decoder->pcm_size = 0;
         decoder->pcm_pos = 0;
+    }
+}
+
+static void flac_backend_close(FormatDecoder* decoder) {
+    if (decoder->flac_decoder) {
+        if (FLAC__stream_decoder_get_state(decoder->flac_decoder) !=
+            FLAC__STREAM_DECODER_UNINITIALIZED) {
+            // FLAC__stream_decoder_finish() releases the FILE* we handed to
+            // init_FILE(); format_decoder_close() must not fclose() it again.
+            (void)FLAC__stream_decoder_finish(decoder->flac_decoder);
+        }
+        FLAC__stream_decoder_delete(decoder->flac_decoder);
+        decoder->flac_decoder = NULL;
     }
 
     if (decoder->flac_buffer) {
@@ -720,7 +838,25 @@ void format_decoder_close(FormatDecoder* decoder) {
     decoder->flac_channels = 0;
     decoder->flac_bits_per_sample = 0;
     decoder->flac_eof = false;
+}
 
+void format_decoder_close(FormatDecoder* decoder) {
+    if (!decoder) return;
+
+    // Tear down per-format state first. The teardown order (FLAC decoder before
+    // fclose, see flac_backend_close) is preserved from the original code. The
+    // individual buffer frees are NULL-guarded, so this is safe even when open()
+    // failed partway through. We unconditionally run both teardowns to stay
+    // robust against a half-initialised decoder, just like the original close.
+    mp3_backend_close(decoder);
+    flac_backend_close(decoder);
+
+    if (decoder->file) {
+        fclose(decoder->file);
+        decoder->file = NULL;
+    }
+
+    decoder->backend = NULL;
     decoder->initialized = false;
 
     // Free any format-specific data
@@ -737,30 +873,34 @@ void format_decoder_destroy(FormatDecoder* decoder) {
     free(decoder);
 }
 
+static uint32_t mp3_backend_get_channels(const FormatDecoder* decoder) {
+    return (uint32_t)decoder->frame_info.channels;
+}
+
+static uint32_t mp3_backend_get_sample_rate(const FormatDecoder* decoder) {
+    return (uint32_t)decoder->frame_info.hz;
+}
+
+static uint32_t flac_backend_get_channels(const FormatDecoder* decoder) {
+    return decoder->flac_channels;
+}
+
+static uint32_t flac_backend_get_sample_rate(const FormatDecoder* decoder) {
+    return decoder->flac_sample_rate;
+}
+
 uint32_t format_decoder_get_channels(const FormatDecoder* decoder) {
-    if (!decoder || !decoder->initialized) {
+    if (!decoder || !decoder->initialized || !decoder->backend) {
         return 0;
     }
-    switch (decoder->format_info.format_type) {
-        case AUDIO_FORMAT_FLAC:
-            return decoder->flac_channels;
-        case AUDIO_FORMAT_MP3:
-        default:
-            return decoder->frame_info.channels;
-    }
+    return decoder->backend->get_channels(decoder);
 }
 
 uint32_t format_decoder_get_sample_rate(const FormatDecoder* decoder) {
-    if (!decoder || !decoder->initialized) {
+    if (!decoder || !decoder->initialized || !decoder->backend) {
         return 0;
     }
-    switch (decoder->format_info.format_type) {
-        case AUDIO_FORMAT_FLAC:
-            return decoder->flac_sample_rate;
-        case AUDIO_FORMAT_MP3:
-        default:
-            return decoder->frame_info.hz;
-    }
+    return decoder->backend->get_sample_rate(decoder);
 }
 
 enum AudioFormatType format_decoder_get_format_type(const FormatDecoder* decoder) {
@@ -931,5 +1071,45 @@ const char* format_decoder_error_string(enum FormatDecoderError error) {
         case FD_ERROR_MEMORY: return "Memory allocation failed";
         case FD_ERROR_DECODE: return "Decoding error";
         default: return "Unknown error";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Backend vtables + selector
+//
+// Each format implements the DecoderBackend interface above. To add a new
+// format: implement <fmt>_backend_{open,read,seek,close,get_*}, register a
+// static const DecoderBackend below, and add a case to backend_for_format()
+// plus detection in detect_audio_format().
+// TODO: add aac/wav/ogg backends here.
+// ---------------------------------------------------------------------------
+
+static const DecoderBackend mp3_backend = {
+    .open            = mp3_backend_open,
+    .read            = mp3_backend_read,
+    .seek            = mp3_backend_seek,
+    .close           = mp3_backend_close,
+    .get_channels    = mp3_backend_get_channels,
+    .get_sample_rate = mp3_backend_get_sample_rate,
+};
+
+static const DecoderBackend flac_backend = {
+    .open            = flac_backend_open,
+    .read            = flac_backend_read,
+    .seek            = flac_backend_seek,
+    .close           = flac_backend_close,
+    .get_channels    = flac_backend_get_channels,
+    .get_sample_rate = flac_backend_get_sample_rate,
+};
+
+static const DecoderBackend* backend_for_format(enum AudioFormatType format_type) {
+    switch (format_type) {
+        case AUDIO_FORMAT_MP3:
+            return &mp3_backend;
+        case AUDIO_FORMAT_FLAC:
+            return &flac_backend;
+        // TODO: add aac/wav/ogg backends here.
+        default:
+            return NULL;
     }
 }

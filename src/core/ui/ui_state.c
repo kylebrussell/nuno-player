@@ -15,6 +15,20 @@ typedef struct {
 static void populateMenu(UIState *state, MenuType type);
 static void pushMenu(UIState *state, MenuType type);
 
+/* Append one entry to a menu being built, respecting MAX_MENU_ITEMS. */
+static void addMenuItem(UIState *state, const char *text,
+                        bool selectable, MenuType submenu) {
+    uint8_t i = state->currentMenu.itemCount;
+    if (i >= MAX_MENU_ITEMS) {
+        return;
+    }
+    strncpy(state->currentMenu.items[i].text, text, MAX_ITEM_LENGTH - 1);
+    state->currentMenu.items[i].text[MAX_ITEM_LENGTH - 1] = '\0';
+    state->currentMenu.items[i].selectable = selectable;
+    state->currentMenu.items[i].submenu = submenu;
+    state->currentMenu.itemCount = (uint8_t)(i + 1);
+}
+
 void UIState_SetPlaybackHandler(UIState *state,
                                 PlayTrackHandler handler,
                                 void *context) {
@@ -178,22 +192,35 @@ static void populateMenu(UIState *state, MenuType type) {
     const char *title = "Menu";
 
     switch (type) {
-        case MENU_MAIN:
+        case MENU_MAIN: {
+            /*
+             * Build the main menu from the active device profile so each iPod
+             * generation shows its authentic entries: Music/Settings/Now Playing
+             * are universal, while Photos/Videos/Extras/Games appear per the
+             * profile's MenuFeatures. Order mirrors the real menus (media first,
+             * Extras, then Settings, with Now Playing pinned last).
+             */
+            const DeviceProfile *p = Display_GetActiveProfile();
             title = "NUNO";
-            state->currentMenu.itemCount = NUM_MAIN_MENU_ITEMS;
-            for (uint8_t i = 0; i < state->currentMenu.itemCount; ++i) {
-                strncpy(state->currentMenu.items[i].text, MAIN_MENU_ITEMS[i], MAX_ITEM_LENGTH - 1);
-                state->currentMenu.items[i].text[MAX_ITEM_LENGTH - 1] = '\0';
-                state->currentMenu.items[i].selectable = (i == 0 || i == 1 || i == 2 || i == 5);
-                switch (i) {
-                    case 0: state->currentMenu.items[i].submenu = MENU_MUSIC; break;
-                    case 1: state->currentMenu.items[i].submenu = MENU_PHOTOS; break;
-                    case 2: state->currentMenu.items[i].submenu = MENU_SETTINGS; break;
-                    case 5: state->currentMenu.items[i].submenu = MENU_NOW_PLAYING; break;
-                    default: state->currentMenu.items[i].submenu = MENU_MAIN; break;
-                }
+
+            addMenuItem(state, "Music", true, MENU_MUSIC);
+            if (p && p->features.photos) {
+                addMenuItem(state, "Photos", false, MENU_PHOTOS);
             }
+            if (p && p->features.videos) {
+                addMenuItem(state, "Videos", false, MENU_MAIN);
+            }
+            if (p && p->features.extras) {
+                /* MENU_PHOTOS currently renders the Extras list. */
+                addMenuItem(state, "Extras", true, MENU_PHOTOS);
+            }
+            if (p && p->features.games) {
+                addMenuItem(state, "Games", false, MENU_MAIN);
+            }
+            addMenuItem(state, "Settings", true, MENU_SETTINGS);
+            addMenuItem(state, "Now Playing", true, MENU_NOW_PLAYING);
             break;
+        }
         case MENU_MUSIC:
             title = "Music";
             state->currentMenu.itemCount = NUM_MUSIC_MENU_ITEMS;

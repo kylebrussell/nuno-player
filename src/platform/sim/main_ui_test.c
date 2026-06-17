@@ -2,6 +2,7 @@
 #include "ui_state.h"
 #include "ui_tasks.h"
 #include "nuno/display.h"
+#include "nuno/device_profile.h"
 #include "platform/sim/audio_controller.h"
 
 #include "nuno/audio_pipeline.h"
@@ -40,12 +41,18 @@ typedef struct {
 #define TRACKPAD_SCROLL_STEP 12.0f
 #define TRACKPAD_ZONE_RATIO 0.25f
 
+/* All input geometry comes from the active device profile's wheel layout. */
+static const WheelLayout *wheel(void) {
+    return &Display_GetActiveProfile()->wheel;
+}
+
 static SDL_Rect getTrackpadRect(void) {
+    const WheelLayout *w = wheel();
     SDL_Rect rect = {
-        SIM_WHEEL_CENTER_X - SIM_WHEEL_OUTER_RADIUS,
-        SIM_WHEEL_CENTER_Y - SIM_WHEEL_OUTER_RADIUS,
-        SIM_WHEEL_OUTER_RADIUS * 2,
-        SIM_WHEEL_OUTER_RADIUS * 2
+        w->centerX - w->outerRadius,
+        w->centerY - w->outerRadius,
+        w->outerRadius * 2,
+        w->outerRadius * 2
     };
     return rect;
 }
@@ -70,6 +77,26 @@ static uint8_t mapTrackpadZone(int x, int y, SDL_Rect rect) {
     }
     if (relX >= (1.0f - TRACKPAD_ZONE_RATIO)) {
         return BUTTON_NEXT;
+    }
+    return 0;
+}
+
+/* 3G-style separate button row hit test (mirrors sdl_mock_display layout). */
+static uint8_t mapButtonRow(int x, int y) {
+    const WheelLayout *w = wheel();
+    if (w->type != WHEEL_TOUCH_BUTTONS) {
+        return 0;
+    }
+    static const uint8_t buttons[4] = { BUTTON_PREV, BUTTON_MENU, BUTTON_PLAY, BUTTON_NEXT };
+    int slotW = (w->outerRadius * 2) / 4;
+    int left = w->centerX - w->outerRadius;
+    if (y < w->buttonRowY - 12 || y > w->buttonRowY + 12) {
+        return 0;
+    }
+    for (int i = 0; i < 4; ++i) {
+        if (x >= left + i * slotW && x < left + (i + 1) * slotW) {
+            return buttons[i];
+        }
     }
     return 0;
 }
@@ -130,63 +157,73 @@ static void handleKeyEvent(SDL_Keysym keysym, UIState *state, uint32_t currentTi
 }
 
 static float pointAngle(int x, int y) {
-    float dx = (float)x - (float)SIM_WHEEL_CENTER_X;
-    float dy = (float)y - (float)SIM_WHEEL_CENTER_Y;
+    const WheelLayout *w = wheel();
+    float dx = (float)x - (float)w->centerX;
+    float dy = (float)y - (float)w->centerY;
     return atan2f(-dy, dx);
 }
 
 static float pointDistance(int x, int y) {
-    float dx = (float)x - (float)SIM_WHEEL_CENTER_X;
-    float dy = (float)y - (float)SIM_WHEEL_CENTER_Y;
+    const WheelLayout *w = wheel();
+    float dx = (float)x - (float)w->centerX;
+    float dy = (float)y - (float)w->centerY;
     return sqrtf(dx * dx + dy * dy);
 }
 
 static void handleMouseButtonDown(const SDL_MouseButtonEvent *buttonEvent,
                                   UIState *state,
-                                  WheelInteraction *wheel,
+                                  WheelInteraction *wheelState,
                                   uint32_t currentTime) {
-    (void)state;
-    (void)currentTime;
     if (buttonEvent->button != SDL_BUTTON_LEFT) {
         return;
     }
 
-    wheel->leftDown = true;
-    wheel->tracking = false;
-    wheel->segmentCandidate = false;
-    wheel->accumulated = 0.0f;
-    wheel->pendingButton = 0;
+    wheelState->leftDown = true;
+    wheelState->tracking = false;
+    wheelState->segmentCandidate = false;
+    wheelState->accumulated = 0.0f;
+    wheelState->pendingButton = 0;
 
+    /* Devices with a separate button row (3G): test the row first. */
+    uint8_t rowButton = mapButtonRow(buttonEvent->x, buttonEvent->y);
+    if (rowButton != 0) {
+        wheelState->pendingButton = rowButton;
+        wheelState->activeButton = rowButton;
+        wheelState->segmentCandidate = true;
+        return;
+    }
+
+    const WheelLayout *w = wheel();
     float distance = pointDistance(buttonEvent->x, buttonEvent->y);
-    if (distance <= (float)SIM_WHEEL_INNER_RADIUS) {
-        wheel->pendingButton = BUTTON_CENTER;
-        wheel->activeButton = BUTTON_CENTER;
+    if (distance <= (float)w->innerRadius) {
+        wheelState->pendingButton = BUTTON_CENTER;
+        wheelState->activeButton = BUTTON_CENTER;
         return;
     }
 
-    if (distance <= (float)SIM_WHEEL_OUTER_RADIUS) {
+    if (distance <= (float)w->outerRadius) {
         float angle = pointAngle(buttonEvent->x, buttonEvent->y);
-        wheel->tracking = true;
-        wheel->segmentCandidate = true;
-        wheel->lastAngle = angle;
-        wheel->pendingButton = angleToButton(angle);
-        wheel->activeButton = wheel->pendingButton;
+        wheelState->tracking = true;
+        wheelState->segmentCandidate = (w->type != WHEEL_TOUCH_BUTTONS);
+        wheelState->lastAngle = angle;
+        wheelState->pendingButton = (w->type != WHEEL_TOUCH_BUTTONS) ? angleToButton(angle) : 0;
+        wheelState->activeButton = wheelState->pendingButton;
         return;
     }
 
-    wheel->activeButton = 0;
+    wheelState->activeButton = 0;
 }
 
 static void handleMouseMotion(const SDL_MouseMotionEvent *motionEvent,
                               UIState *state,
-                              WheelInteraction *wheel,
+                              WheelInteraction *wheelState,
                               uint32_t currentTime) {
-    if (!wheel->leftDown || !wheel->tracking) {
+    if (!wheelState->leftDown || !wheelState->tracking) {
         return;
     }
 
     float angle = pointAngle(motionEvent->x, motionEvent->y);
-    float delta = angle - wheel->lastAngle;
+    float delta = angle - wheelState->lastAngle;
 
     if (delta > (float)M_PI) {
         delta -= 2.0f * (float)M_PI;
@@ -194,58 +231,64 @@ static void handleMouseMotion(const SDL_MouseMotionEvent *motionEvent,
         delta += 2.0f * (float)M_PI;
     }
 
-    wheel->lastAngle = angle;
-    wheel->accumulated += delta;
+    wheelState->lastAngle = angle;
+    wheelState->accumulated += delta;
 
-    if (wheel->segmentCandidate) {
-        if (fabsf(wheel->accumulated) > 0.12f) {
-            wheel->segmentCandidate = false;
-            wheel->pendingButton = 0;
-            if (wheel->activeButton != BUTTON_CENTER) {
-                wheel->activeButton = 0;
+    if (wheelState->segmentCandidate) {
+        if (fabsf(wheelState->accumulated) > 0.12f) {
+            wheelState->segmentCandidate = false;
+            wheelState->pendingButton = 0;
+            if (wheelState->activeButton != BUTTON_CENTER) {
+                wheelState->activeButton = 0;
             }
         } else {
             uint8_t nextButton = angleToButton(angle);
-            if (nextButton != wheel->pendingButton) {
-                wheel->pendingButton = nextButton;
-                wheel->activeButton = nextButton;
+            if (nextButton != wheelState->pendingButton) {
+                wheelState->pendingButton = nextButton;
+                wheelState->activeButton = nextButton;
             }
         }
     }
 
     const float rotationStep = 0.25f; // ~14 degrees per tick
-    while (wheel->accumulated <= -rotationStep) {
+    while (wheelState->accumulated <= -rotationStep) {
         handleRotation(state, 1, currentTime);
-        wheel->accumulated += rotationStep;
-        wheel->activeButton = 0;
+        wheelState->accumulated += rotationStep;
+        wheelState->activeButton = 0;
     }
-    while (wheel->accumulated >= rotationStep) {
+    while (wheelState->accumulated >= rotationStep) {
         handleRotation(state, -1, currentTime);
-        wheel->accumulated -= rotationStep;
-        wheel->activeButton = 0;
+        wheelState->accumulated -= rotationStep;
+        wheelState->activeButton = 0;
     }
 }
 
 static void handleMouseButtonUp(const SDL_MouseButtonEvent *buttonEvent,
                                 UIState *state,
-                                WheelInteraction *wheel,
+                                WheelInteraction *wheelState,
                                 uint32_t currentTime) {
-    if (buttonEvent->button != SDL_BUTTON_LEFT || !wheel->leftDown) {
+    if (buttonEvent->button != SDL_BUTTON_LEFT || !wheelState->leftDown) {
         return;
     }
 
-    wheel->leftDown = false;
+    wheelState->leftDown = false;
     uint8_t buttonToFire = 0;
+    const WheelLayout *w = wheel();
 
     float distance = pointDistance(buttonEvent->x, buttonEvent->y);
-    if (wheel->pendingButton == BUTTON_CENTER) {
-        if (distance <= (float)SIM_WHEEL_INNER_RADIUS) {
+    if (wheelState->pendingButton == BUTTON_CENTER) {
+        if (distance <= (float)w->innerRadius) {
             buttonToFire = BUTTON_CENTER;
         }
-    } else if (wheel->segmentCandidate && wheel->pendingButton != 0) {
-        if (distance >= (float)(SIM_WHEEL_INNER_RADIUS - 6) &&
-            distance <= (float)(SIM_WHEEL_OUTER_RADIUS + 6)) {
-            buttonToFire = wheel->pendingButton;
+    } else if (wheelState->segmentCandidate && wheelState->pendingButton != 0) {
+        if (w->type == WHEEL_TOUCH_BUTTONS) {
+            /* Confirm the release is still over the same row button. */
+            if (mapButtonRow(buttonEvent->x, buttonEvent->y) == wheelState->pendingButton) {
+                buttonToFire = wheelState->pendingButton;
+            }
+        } else if (distance >= (float)(w->innerRadius - 6) &&
+                   distance <= (float)(w->outerRadius + 6)) {
+            buttonToFire = wheelState->pendingButton;
         }
     }
 
@@ -253,11 +296,11 @@ static void handleMouseButtonUp(const SDL_MouseButtonEvent *buttonEvent,
         handleButtonPress(state, buttonToFire, currentTime);
     }
 
-    wheel->tracking = false;
-    wheel->segmentCandidate = false;
-    wheel->pendingButton = 0;
-    wheel->activeButton = 0;
-    wheel->accumulated = 0.0f;
+    wheelState->tracking = false;
+    wheelState->segmentCandidate = false;
+    wheelState->pendingButton = 0;
+    wheelState->activeButton = 0;
+    wheelState->accumulated = 0.0f;
 }
 
 static void handleTrackpadMouseButtonDown(const SDL_MouseButtonEvent *buttonEvent,
@@ -336,14 +379,101 @@ static void handleTrackpadMouseButtonUp(const SDL_MouseButtonEvent *buttonEvent,
     }
 }
 
-int main(void) {
-    if (!Display_Init("NUNO Simulator")) {
+/* ------------------------------------------------------------------ */
+/* Device selection                                                   */
+/* ------------------------------------------------------------------ */
+
+static void printDeviceList(void) {
+    printf("Available devices (--device <id>):\n");
+    for (size_t i = 0; i < DeviceProfiles_Count(); ++i) {
+        const DeviceProfile *p = DeviceProfiles_Get(i);
+        printf("  %-14s %s\n", p->id, p->displayName);
+    }
+}
+
+static size_t indexOfProfile(const DeviceProfile *profile) {
+    for (size_t i = 0; i < DeviceProfiles_Count(); ++i) {
+        if (DeviceProfiles_Get(i) == profile) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+static void switchDevice(size_t index, WheelInteraction *wheelState, TrackpadInteraction *trackpad) {
+    const DeviceProfile *p = DeviceProfiles_Get(index);
+    if (!p) {
+        return;
+    }
+    if (!Display_SwitchProfile(p)) {
+        fprintf(stderr, "Failed to switch to device %s\n", p->id);
+        return;
+    }
+    memset(wheelState, 0, sizeof(*wheelState));
+    memset(trackpad, 0, sizeof(*trackpad));
+    printf("Device: %s (%s, %dx%d)\n", p->displayName, p->id,
+           p->screen.width, p->screen.height);
+}
+
+int main(int argc, char **argv) {
+    const DeviceProfile *startProfile = DeviceProfiles_Default();
+    const char *shotPath = NULL;
+
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--list") == 0) {
+            printDeviceList();
+            return 0;
+        }
+        if (strcmp(argv[i], "--shot") == 0 && i + 1 < argc) {
+            shotPath = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "--device") == 0 && i + 1 < argc) {
+            const DeviceProfile *p = DeviceProfiles_FindById(argv[++i]);
+            if (!p) {
+                fprintf(stderr, "Unknown device '%s'.\n", argv[i]);
+                printDeviceList();
+                return 1;
+            }
+            startProfile = p;
+        } else if (strncmp(argv[i], "--device=", 9) == 0) {
+            const DeviceProfile *p = DeviceProfiles_FindById(argv[i] + 9);
+            if (!p) {
+                fprintf(stderr, "Unknown device '%s'.\n", argv[i] + 9);
+                printDeviceList();
+                return 1;
+            }
+            startProfile = p;
+        }
+    }
+
+    char windowTitle[128];
+    snprintf(windowTitle, sizeof(windowTitle), "NUNO Simulator — %s", startProfile->displayName);
+    if (!Display_Init(windowTitle, startProfile)) {
         return 1;
     }
+    printf("Device: %s (%s, %dx%d). Use [ and ] to cycle generations.\n",
+           startProfile->displayName, startProfile->id,
+           startProfile->screen.width, startProfile->screen.height);
 
     if (!MenuRenderer_Init()) {
         Display_Shutdown();
         return 1;
+    }
+
+    // Headless capture mode: render one frame of the main menu and exit.
+    if (shotPath) {
+        UIState shotState;
+        initUIState(&shotState);
+        Display_RenderBackground();
+        MenuRenderer_Render(&shotState, SDL_GetTicks());
+        Display_RenderClickWheel(0);
+        bool ok = Display_SaveScreenshot(shotPath);
+        Display_Present();
+        printf("Screenshot %s: %s\n", shotPath, ok ? "saved" : "FAILED");
+        Display_Shutdown();
+        SDL_Quit();
+        return ok ? 0 : 1;
     }
 
     bool audio_ready = SimAudio_Init();
@@ -361,9 +491,10 @@ int main(void) {
 
     bool running = true;
     SDL_Event event;
-    WheelInteraction wheel = {0};
+    WheelInteraction wheelState = {0};
     TrackpadInteraction trackpad = {0};
     bool trackpad_mode = false;
+    size_t deviceIndex = indexOfProfile(startProfile);
 
     while (running) {
         uint32_t currentTime = SDL_GetTicks();
@@ -375,11 +506,18 @@ int main(void) {
                     break;
                 case SDL_KEYDOWN:
                     if (!event.key.repeat) {
-                        if (event.key.keysym.sym == SDLK_t) {
+                        SDL_Keycode sym = event.key.keysym.sym;
+                        if (sym == SDLK_t) {
                             trackpad_mode = !trackpad_mode;
                             memset(&trackpad, 0, sizeof(trackpad));
-                            memset(&wheel, 0, sizeof(wheel));
+                            memset(&wheelState, 0, sizeof(wheelState));
                             printf("Trackpad mode: %s\n", trackpad_mode ? "ON" : "OFF");
+                        } else if (sym == SDLK_RIGHTBRACKET) {
+                            deviceIndex = (deviceIndex + 1) % DeviceProfiles_Count();
+                            switchDevice(deviceIndex, &wheelState, &trackpad);
+                        } else if (sym == SDLK_LEFTBRACKET) {
+                            deviceIndex = (deviceIndex + DeviceProfiles_Count() - 1) % DeviceProfiles_Count();
+                            switchDevice(deviceIndex, &wheelState, &trackpad);
                         } else {
                             handleKeyEvent(event.key.keysym, &uiState, currentTime);
                         }
@@ -389,21 +527,21 @@ int main(void) {
                     if (trackpad_mode) {
                         handleTrackpadMouseButtonDown(&event.button, &uiState, &trackpad, currentTime);
                     } else {
-                        handleMouseButtonDown(&event.button, &uiState, &wheel, currentTime);
+                        handleMouseButtonDown(&event.button, &uiState, &wheelState, currentTime);
                     }
                     break;
                 case SDL_MOUSEBUTTONUP:
                     if (trackpad_mode) {
                         handleTrackpadMouseButtonUp(&event.button, &uiState, &trackpad, currentTime);
                     } else {
-                        handleMouseButtonUp(&event.button, &uiState, &wheel, currentTime);
+                        handleMouseButtonUp(&event.button, &uiState, &wheelState, currentTime);
                     }
                     break;
                 case SDL_MOUSEMOTION:
                     if (trackpad_mode) {
                         handleTrackpadMouseMotion(&event.motion, &uiState, &trackpad, currentTime);
                     } else if (event.motion.state & SDL_BUTTON_LMASK) {
-                        handleMouseMotion(&event.motion, &uiState, &wheel, currentTime);
+                        handleMouseMotion(&event.motion, &uiState, &wheelState, currentTime);
                     }
                     break;
                 case SDL_MOUSEWHEEL:
@@ -436,7 +574,7 @@ int main(void) {
         }
         Display_RenderBackground();
         MenuRenderer_Render(&uiState, currentTime);
-        Display_RenderClickWheel(wheel.leftDown ? wheel.activeButton : 0);
+        Display_RenderClickWheel(wheelState.leftDown ? wheelState.activeButton : 0);
         Display_Present();
         SDL_Delay(16);
     }

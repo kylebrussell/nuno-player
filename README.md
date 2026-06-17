@@ -32,8 +32,42 @@ You can exercise the UI and menu flow locally without the embedded toolchain by 
    ```
 3. Launch the simulator:
    ```bash
-   ./build/nuno-sim
+   ./build/nuno-sim                 # default device (iPod mini)
+   ./build/nuno-sim --device ipod-5g
+   ./build/nuno-sim --list          # list available device skins
    ```
+
+### Device Skins (multiple iPod generations)
+
+The simulator renders the same playback/UI engine through a runtime
+**device profile** describing each generation's screen (size + colour model),
+click wheel (scroll / touch / touch+buttons / click), chassis and theme.
+Profiles live in `src/platform/sim/device_profiles.c`; adding a generation is a
+one-line append.
+
+- `--device <id>` – start on a specific generation (`--list` to see ids)
+- `[` and `]` – cycle to the previous / next generation **live**, without
+  restarting; playback and menu position carry over
+- `--shot <file.bmp>` – render one frame of the current device and exit
+  (headless preview capture)
+
+Current lineup: `ipod-1g`, `ipod-3g`, `ipod-4g`, `ipod-mini`, `ipod-photo`,
+`ipod-5g`, `ipod-nano`, `ipod-classic`, plus the mini anodized colour variants
+`ipod-mini-blue`, `ipod-mini-pink`, `ipod-mini-green`.
+
+Each profile carries its own palette and main-menu feature set, so the same
+engine renders each generation authentically:
+
+- **Themes** – monochrome panels (1G–4G, mini) keep the original inverted
+  selection bar; colour panels (photo, 5G, nano, classic) get a glossy blue
+  selection **gradient** and a subtly shaded title bar.
+- **Per-generation menus** – `Music`, `Settings` and `Now Playing` are
+  universal; `Photos` appears on colour models and `Videos` on the 5G/classic,
+  matching the real lineup. Feature flags live in `DeviceProfile.features`.
+- **Faceplate hook** – a profile may set `chassis.faceplateImage` to a bitmap
+  path; the sim then blits that image (loaded once and cached) scaled to the
+  canvas instead of the procedural body. All shipped profiles leave it unset and
+  use the procedural chassis.
 
 ### Simulator Controls
 - Arrow keys or `j`/`k` – scroll through menu items

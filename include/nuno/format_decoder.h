@@ -118,8 +118,8 @@ typedef struct BufferRequirements {
     uint32_t frames_per_buffer; // Recommended number of frames per buffer
 } BufferRequirements;
 
-// Format detection function (implemented in format_handlers.c)
-enum FormatDecoderError detect_audio_format(const uint8_t* data, size_t size, 
+// Format detection function (implemented in format_decoder.c)
+enum FormatDecoderError detect_audio_format(const uint8_t* data, size_t size,
                                           AudioFormatInfo* format_info);
 
 /**

@@ -90,7 +90,7 @@ static void renderMenuItem(const MenuItem* item, uint8_t index, bool selected) {
     }
 
     if (selected) {
-        Display_FillRect(0, y, DISPLAY_WIDTH, ITEM_HEIGHT, HIGHLIGHT_COLOR);
+        Display_FillSelection(0, y, DISPLAY_WIDTH, ITEM_HEIGHT);
     }
 
     Display_DrawText(item->text,
@@ -146,8 +146,9 @@ static void renderNowPlayingView(const UIState* state, uint32_t currentTime) {
     Display_FillRect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0);
 
     // Draw title bar
-    Display_FillRect(0, 0, DISPLAY_WIDTH, TITLE_BAR_HEIGHT, 0);
-    Display_DrawText("Now Playing", TEXT_MARGIN, 2, TITLE_TEXT_COLOR);
+    Display_FillTitleBar(0, 0, DISPLAY_WIDTH, TITLE_BAR_HEIGHT);
+    Display_DrawText("Now Playing", TEXT_MARGIN,
+                     (TITLE_BAR_HEIGHT - TEXT_HEIGHT) / 2, TITLE_TEXT_COLOR);
 
     // Battery indicator
     renderBatteryIndicator(state->batteryLevel);
@@ -158,22 +159,22 @@ static void renderNowPlayingView(const UIState* state, uint32_t currentTime) {
         trackTitle = "Unknown Track";
     }
 
-    // Estimate width based on character count (each character is ~5-6 pixels)
-    int titleWidth = (int)strlen(trackTitle) * 5;
+    // Centered, measured against the active font scale.
+    int titleWidth = Display_MeasureText(trackTitle);
     int titleX = (DISPLAY_WIDTH - titleWidth) / 2;
-    int titleY = 20; // Position closer to title bar for more prominence
+    int titleY = TITLE_BAR_HEIGHT + DISPLAY_HEIGHT / 6; // proportional to screen
 
     Display_DrawText(trackTitle, titleX, titleY, NORMAL_TEXT_COLOR);
 
-    // Artist name (centered, below track title - smaller text)
+    // Artist name (centered, below track title)
     const char* artist = state->currentArtist;
     if (strlen(artist) == 0) {
         artist = "Unknown Artist";
     }
 
-    int artistWidth = (int)strlen(artist) * 5;
+    int artistWidth = Display_MeasureText(artist);
     int artistX = (DISPLAY_WIDTH - artistWidth) / 2;
-    int artistY = titleY + 18; // Tighter spacing for iPod mini look
+    int artistY = titleY + TEXT_HEIGHT + 6;
 
     Display_DrawText(artist, artistX, artistY, NORMAL_TEXT_COLOR);
 
@@ -215,7 +216,7 @@ static void renderNowPlayingView(const UIState* state, uint32_t currentTime) {
         : 0;
     char rightTime[8];
     snprintf(rightTime, sizeof(rightTime), "-%u:%02u", (uint16_t)(rem / 60), (uint16_t)(rem % 60));
-    int rightWidth = (int)strlen(rightTime) * 5;
+    int rightWidth = Display_MeasureText(rightTime);
     int rightX = DISPLAY_WIDTH - rightWidth - TEXT_MARGIN;
     if (rightX < 0) rightX = 0;
     Display_DrawText(rightTime, rightX, timeY, NORMAL_TEXT_COLOR);
@@ -272,8 +273,9 @@ void MenuRenderer_Render(const UIState* state, uint32_t currentTime) {
                            i == state->currentMenu.selectedIndex);
         }
 
-        Display_FillRect(0, 0, DISPLAY_WIDTH, TITLE_BAR_HEIGHT, 0);
-        Display_DrawText(state->currentMenu.title, TEXT_MARGIN, 2, TITLE_TEXT_COLOR);
+        Display_FillTitleBar(0, 0, DISPLAY_WIDTH, TITLE_BAR_HEIGHT);
+        Display_DrawText(state->currentMenu.title, TEXT_MARGIN,
+                         (TITLE_BAR_HEIGHT - TEXT_HEIGHT) / 2, TITLE_TEXT_COLOR);
 
         if (state->currentMenuType == MENU_NOW_PLAYING && state->isPlaying) {
             renderProgressBar(state->currentTrackTime, state->totalTrackTime);

@@ -11,18 +11,21 @@
 #define MAX_TITLE_LENGTH 32
 #define MAX_ITEM_LENGTH 32
 
-// Layout constants
-#define ITEM_HEIGHT 16
-#define TEXT_HEIGHT 12
-#define TEXT_MARGIN 4
-#define TITLE_BAR_HEIGHT 16
+// Layout metrics — resolved at runtime from the active device profile so the
+// same renderer adapts to each iPod generation's screen size and font scale.
+#define ITEM_HEIGHT      (Display_GetMetrics()->itemHeight)
+#define TEXT_HEIGHT      (Display_GetMetrics()->textHeight)
+#define TEXT_MARGIN      (Display_GetMetrics()->textMargin)
+#define TITLE_BAR_HEIGHT (Display_GetMetrics()->titleBarHeight)
 
-// Colors (for monochrome display these translate to different patterns)
-#define NORMAL_TEXT_COLOR 1
-#define SELECTED_TEXT_COLOR 0
-#define HIGHLIGHT_COLOR 1
-#define TITLE_TEXT_COLOR 1
-#define PROGRESS_COLOR 1
+// Semantic colour roles — the active profile's theme resolves these to RGBA.
+// Monochrome profiles keep the original inverted-selection look; colour
+// profiles get blue selection/title bars from the same call sites.
+#define NORMAL_TEXT_COLOR   COLOR_ROLE_FOREGROUND
+#define SELECTED_TEXT_COLOR COLOR_ROLE_SELECTED_FG
+#define HIGHLIGHT_COLOR     COLOR_ROLE_SELECTED_BG
+#define TITLE_TEXT_COLOR    COLOR_ROLE_TITLE_FG
+#define PROGRESS_COLOR      COLOR_ROLE_ACCENT
 
 typedef enum {
     MENU_MAIN,

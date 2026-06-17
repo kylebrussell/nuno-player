@@ -28,6 +28,7 @@ target_compile_definitions(libflac PRIVATE
     FLAC__NO_DLL
     HAVE_CONFIG_H
     FLAC__NO_ASM
+    FLAC__HAS_OGG=0
     PACKAGE_VERSION="1.4.3"
 )
 

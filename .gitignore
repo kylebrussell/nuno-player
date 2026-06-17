@@ -1,5 +1,7 @@
 # Build directory
 build/
+build-sim/
+build-audio/
 
 # IDE specific
 .vscode/

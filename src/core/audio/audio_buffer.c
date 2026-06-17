@@ -9,9 +9,30 @@
 
 #define DMA_BUFFER_COUNT 2U
 
+/*
+ * Unit conventions for this module (read before touching counts):
+ *   - data[]            : interleaved S16 PCM. Indexed in *samples* (uint16_t
+ *                         elements); holds AUDIO_BUFFER_SIZE samples ==
+ *                         AUDIO_BUFFER_FRAMES frames (AUDIO_OUT_CHANNELS per frame).
+ *   - valid_frames[]    : number of decoded *frames* (stereo sample pairs)
+ *                         currently valid in the matching data[] buffer.
+ *   - low/high_threshold: *frame* counts (see AUDIO_BUFFER_FRAMES / LOW_WATER_MARK).
+ * One frame == AUDIO_OUT_CHANNELS samples == AUDIO_OUT_CHANNELS * sizeof(uint16_t) bytes.
+ * The DMA layer is driven elsewhere with a length of AUDIO_BUFFER_SIZE (samples),
+ * matching the uint16_t element count of data[].
+ */
 typedef struct {
+    /*
+     * data[]/valid_frames[]/active are shared between the producer (fill_buffer,
+     * driven from the DMA-complete / audio-task path) and the audio output
+     * callback that consumes the active buffer. The double-buffer scheme keeps
+     * them on separate indices so the producer fills the just-consumed buffer
+     * while the callback drains the other; 'active' is flipped only from the
+     * consume path. This is intentionally lock-free and single-writer per index.
+     * Keep that invariant if you add producers.
+     */
     uint16_t data[DMA_BUFFER_COUNT][AUDIO_BUFFER_SIZE];
-    size_t valid_samples[DMA_BUFFER_COUNT];  // frames (interleaved stereo)
+    size_t valid_frames[DMA_BUFFER_COUNT];  // decoded frames (interleaved stereo pairs)
     size_t active;
 
     BufferState state;
@@ -64,7 +85,7 @@ static AudioBufferState g_buffer;
 
 static void reset_internal_state(void);
 static bool fill_buffer(size_t index);
-static void update_utilisation(size_t available_samples);
+static void update_utilisation(size_t available_frames);
 
 bool AudioBuffer_Init(void) {
     reset_internal_state();
@@ -119,7 +140,7 @@ bool AudioBuffer_Done(void) {
 
     g_buffer.active = next_index;
 
-    if (g_buffer.valid_samples[next_index] == 0U && g_buffer.end_of_stream) {
+    if (g_buffer.valid_frames[next_index] == 0U && g_buffer.end_of_stream) {
         printf("End of stream reached\n");
         g_buffer.state = BUFFER_STATE_END_OF_STREAM;
         return false;
@@ -145,11 +166,11 @@ bool AudioBuffer_ProcessComplete(void) {
 }
 
 void AudioBuffer_Update(void) {
-    update_utilisation(g_buffer.valid_samples[g_buffer.active]);
+    update_utilisation(g_buffer.valid_frames[g_buffer.active]);
 }
 
 bool AudioBuffer_IsUnderThreshold(void) {
-    return g_buffer.valid_samples[g_buffer.active] <= g_buffer.low_threshold;
+    return g_buffer.valid_frames[g_buffer.active] <= g_buffer.low_threshold;
 }
 
 void AudioBuffer_HandleUnderrun(void) {
@@ -162,6 +183,8 @@ void AudioBuffer_HandleUnderrun(void) {
     memset(g_buffer.data[g_buffer.active], 0, AUDIO_BUFFER_BYTES);
 
     g_buffer.underrun.timestamp_ms = start;
+    /* One full buffer was zero-filled; report the loss as a frame count
+     * (the public field is historically named "samples_lost"). */
     g_buffer.underrun.samples_lost = AUDIO_BUFFER_FRAMES;
 
     if (!fill_buffer(g_buffer.active)) {
@@ -351,7 +374,7 @@ void AudioBuffer_GetSampleFormat(uint8_t *bits_per_sample,
 
 bool AudioBuffer_Flush(bool reset_stats) {
     memset(g_buffer.data, 0, sizeof(g_buffer.data));
-    memset(g_buffer.valid_samples, 0, sizeof(g_buffer.valid_samples));
+    memset(g_buffer.valid_frames, 0, sizeof(g_buffer.valid_frames));
     g_buffer.active = 0U;
     g_buffer.end_of_stream = false;
     g_buffer.state = BUFFER_STATE_EMPTY;
@@ -468,7 +491,7 @@ static bool fill_buffer(size_t index) {
             g_buffer.end_of_stream = (frames_read == 0U);
         }
 
-        g_buffer.valid_samples[index] = frames_read;
+        g_buffer.valid_frames[index] = frames_read;
         g_buffer.stats.total_samples += frames_read;
         printf("Fallback read: %zu frames\n", frames_read);
         return frames_read > 0U;
@@ -547,14 +570,15 @@ static bool fill_buffer(size_t index) {
         g_buffer.end_of_stream = (frames_read_total == 0U);
     }
 
-    g_buffer.valid_samples[index] = frames_read_total;
+    g_buffer.valid_frames[index] = frames_read_total;
     g_buffer.stats.total_samples += frames_read_total;
     printf("Buffer filled with %zu frames\n", frames_read_total);
     return frames_read_total > 0U;
 }
 
-static void update_utilisation(size_t available_samples) {
-    float current = (float)available_samples / (float)AUDIO_BUFFER_FRAMES;
+static void update_utilisation(size_t available_frames) {
+    /* frames / frames -> 0..1 fill ratio (both operands are frame counts). */
+    float current = (float)available_frames / (float)AUDIO_BUFFER_FRAMES;
     g_buffer.stats.average_utilisation =
         (g_buffer.stats.average_utilisation * 0.9f) + (current * 0.1f);
 }

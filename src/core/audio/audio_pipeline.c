@@ -115,7 +115,10 @@ bool AudioPipeline_Play(void) {
         return false;
     }
 
-    // Ensure audio streaming is (re)started when transitioning to PLAYING
+    // Ensure audio streaming is (re)started when transitioning to PLAYING.
+    // DMA length is AUDIO_BUFFER_SIZE *samples* (uint16_t element count of the
+    // buffer), i.e. AUDIO_BUFFER_FRAMES * AUDIO_OUT_CHANNELS. This matches every
+    // other DMA_StartTransfer call site in the project.
     (void)DMA_StartTransfer(AudioBuffer_GetBuffer(), AUDIO_BUFFER_SIZE);
 
     set_state(PIPELINE_STATE_PLAYING);

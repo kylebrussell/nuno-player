@@ -125,6 +125,7 @@ if(BUILD_SIM)
   add_executable(nuno-sim
       src/platform/sim/main_ui_test.c
       src/platform/sim/sdl_mock_display.c
+      src/platform/sim/device_profiles.c
       src/platform/sim/platform_sim.c
       src/platform/sim/audio_controller.c
       src/platform/sim/filesystem_sim.c
