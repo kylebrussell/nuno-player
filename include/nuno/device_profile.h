@@ -119,6 +119,19 @@ typedef struct {
 /* Chassis                                                            */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Surface finish of the chassis. The high-fidelity procedural renderer shades
+ * each material differently: glossy white/black plastic gets a bright specular
+ * sheen and crisp edge highlight; anodized aluminium gets a soft brushed sheen
+ * and cooler edge falloff; matte black absorbs the sheen. Additive field — older
+ * profiles that leave it zero get MATERIAL_PLASTIC_GLOSS, the previous look.
+ */
+typedef enum {
+    MATERIAL_PLASTIC_GLOSS = 0, /* 1G-5G/photo white & nano black plastic   */
+    MATERIAL_ALUMINIUM,         /* mini variants + classic anodized metal    */
+    MATERIAL_PLASTIC_MATTE      /* softer, less specular plastic             */
+} ChassisMaterial;
+
 typedef struct {
     int       canvasWidth;   /* full faceplate size (sim window, pre-scale) */
     int       canvasHeight;
@@ -127,6 +140,15 @@ typedef struct {
     NunoColor bodyTop;
     NunoColor bodyBottom;
     NunoColor bezelColor;    /* frame drawn around the screen               */
+    /* --- High-fidelity procedural shading (additive; sensible defaults) --- */
+    ChassisMaterial material;    /* surface finish; drives the sheen model   */
+    int       cornerRadius;      /* body rounded-corner radius (canvas px).
+                                  * <=0 => renderer derives ~10% of width.   */
+    int       bodyInset;         /* gap from canvas edge to the body rect, so
+                                  * the device floats over a drop shadow.
+                                  * <=0 => renderer derives a small inset.    */
+    NunoColor backdropTop;       /* window background behind the device      */
+    NunoColor backdropBottom;
     /* Asset-ready override: when non-NULL the sim should blit this faceplate
      * PNG instead of drawing the procedural body (not yet implemented; the
      * field exists so profiles and the renderer are ready for it). */

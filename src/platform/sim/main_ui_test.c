@@ -484,6 +484,7 @@ int main(int argc, char **argv) {
 
     if (audio_ready) {
         UIState_SetPlaybackHandler(&uiState, SimAudio_PlayTrack, NULL);
+        AudioPipeline_SetVolume(uiState.volume); // sync engine to UI default
         printf("Playback handler set\n");
     } else {
         printf("No playback handler set due to audio init failure\n");

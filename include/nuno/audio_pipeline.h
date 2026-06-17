@@ -58,10 +58,41 @@ bool AudioPipeline_PlayTrack(size_t track_index);
 
 /**
  * @brief Set audio volume
- * @param volume Volume level (0-100)
+ *
+ * Sets the software master volume applied by the buffer producer to the PCM
+ * stream (0-100). 100 is bit-exact passthrough. A mild quadratic perceptual
+ * curve maps the percentage to gain; the producer ramps toward the target per
+ * block to avoid zipper noise. Also forwarded to the (stubbed) hardware codec.
+ *
+ * @param volume Volume level (0-100, clamped)
  * @return true if volume set successfully, false otherwise
  */
 bool AudioPipeline_SetVolume(uint8_t volume);
+
+/**
+ * @brief Get the current software master volume (0-100).
+ */
+uint8_t AudioPipeline_GetVolume(void);
+
+/**
+ * @brief Poll whether a gapless track transition has occurred.
+ *
+ * Returns true exactly once per gapless transition performed by the buffer
+ * producer, latching the new value. A UI poll loop can use this to refresh the
+ * "Now Playing" view after the pipeline seamlessly advances tracks on EOF,
+ * without the audio core depending on any UI code.
+ *
+ * @return true if the active track changed since the previous call
+ */
+bool AudioPipeline_ConsumeTrackChanged(void);
+
+/**
+ * @brief Monotonic count of gapless track transitions since init.
+ *
+ * Alternative to AudioPipeline_ConsumeTrackChanged() for callers that prefer to
+ * track the sequence value themselves.
+ */
+uint32_t AudioPipeline_GetTrackChangeCount(void);
 
 /**
  * @brief Configure pipeline parameters

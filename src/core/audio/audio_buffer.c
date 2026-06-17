@@ -4,10 +4,22 @@
 #include "nuno/format_decoder.h"
 #include "nuno/platform.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
 #define DMA_BUFFER_COUNT 2U
+
+/*
+ * Software volume curve. The public target is a 0..100 percentage; the applied
+ * gain is (percent/100)^2, a mild perceptual curve that keeps 100% bit-exact
+ * (gain == 1.0) so the default does not alter output. VOLUME_RAMP_STEP bounds
+ * how far the per-block applied gain may move toward the target each fill, which
+ * removes zipper noise on abrupt volume changes (one fill == AUDIO_BUFFER_FRAMES
+ * frames, ~46 ms at 44.1 kHz, so a full 0<->1 sweep takes a handful of blocks).
+ */
+#define VOLUME_MAX_PERCENT 100U
+#define VOLUME_RAMP_STEP   0.25f
 
 /*
  * Unit conventions for this module (read before touching counts):
@@ -32,15 +44,34 @@ typedef struct {
      * Keep that invariant if you add producers.
      */
     uint16_t data[DMA_BUFFER_COUNT][AUDIO_BUFFER_SIZE];
-    size_t valid_frames[DMA_BUFFER_COUNT];  // decoded frames (interleaved stereo pairs)
-    size_t active;
+    /*
+     * Shared producer/consumer scalars are atomic - see the contract in
+     * audio_buffer.h. 'active' is published with release ordering from the
+     * consume path and read with acquire ordering from the producer/consumer;
+     * the others are single-writer (producer) with relaxed loads on the read
+     * side, which is sufficient because 'active' is the synchronising handoff.
+     */
+    _Atomic size_t valid_frames[DMA_BUFFER_COUNT];  // decoded frames (interleaved stereo pairs)
+    _Atomic size_t active;
 
-    BufferState state;
+    _Atomic int state;        // BufferState, stored as int for atomic ops
     bool initialised;
-    bool end_of_stream;
+    _Atomic bool end_of_stream;
 
     bool next_track_available;
     size_t remaining_tracks;
+
+    /* Software master volume. target_percent is the control input (any thread);
+     * applied_gain is producer-local and ramps toward the target per block. */
+    _Atomic uint8_t volume_percent;
+    float applied_gain;
+
+    /* Gapless: provider that yields the next track's decoder on EOF, plus a
+     * monotonic transition counter the UI can poll. */
+    AudioBufferNextTrackProvider next_track_provider;
+    void* next_track_user_data;
+    _Atomic uint32_t track_change_count;
+    uint32_t track_change_seen;  // last value latched by ConsumeTrackChanged
 
     size_t low_threshold;
     size_t high_threshold;
@@ -87,6 +118,44 @@ static void reset_internal_state(void);
 static bool fill_buffer(size_t index);
 static void update_utilisation(size_t available_frames);
 
+/* Map a 0..100 volume percentage to a linear gain via a mild quadratic curve.
+ * 100% -> 1.0 exactly (bit-exact passthrough); 0% -> 0.0 (silence). */
+static inline float volume_percent_to_gain(uint8_t percent) {
+    if (percent >= VOLUME_MAX_PERCENT) {
+        return 1.0f;
+    }
+    float norm = (float)percent / (float)VOLUME_MAX_PERCENT;
+    return norm * norm;
+}
+
+/* Producer-side: nudge the applied gain toward the volume target. Returns the
+ * gain in effect for the block being produced. Clamping the per-block step
+ * removes zipper noise; once the target is reached this is a no-op. */
+static float advance_volume_gain(void) {
+    uint8_t percent = atomic_load_explicit(&g_buffer.volume_percent,
+                                           memory_order_relaxed);
+    float target = volume_percent_to_gain(percent);
+    float current = g_buffer.applied_gain;
+    float delta = target - current;
+    if (delta > VOLUME_RAMP_STEP) {
+        current += VOLUME_RAMP_STEP;
+    } else if (delta < -VOLUME_RAMP_STEP) {
+        current -= VOLUME_RAMP_STEP;
+    } else {
+        current = target;
+    }
+    g_buffer.applied_gain = current;
+    return current;
+}
+
+static inline void set_state(BufferState state) {
+    atomic_store_explicit(&g_buffer.state, (int)state, memory_order_relaxed);
+}
+
+static inline BufferState get_state(void) {
+    return (BufferState)atomic_load_explicit(&g_buffer.state, memory_order_relaxed);
+}
+
 bool AudioBuffer_Init(void) {
     reset_internal_state();
     g_buffer.initialised = true;
@@ -108,52 +177,64 @@ bool AudioBuffer_StartPlayback(void) {
     }
 
     if (!fill_buffer(0U)) {
-        g_buffer.state = BUFFER_STATE_END_OF_STREAM;
+        set_state(BUFFER_STATE_END_OF_STREAM);
         return false;
     }
 
     if (!fill_buffer(1U)) {
         /* We can still play the first buffer, but mark end of stream. */
-        g_buffer.end_of_stream = true;
+        atomic_store_explicit(&g_buffer.end_of_stream, true, memory_order_relaxed);
     }
 
-    g_buffer.active = 0U;
-    g_buffer.state = BUFFER_STATE_READY;
+    /* Publish the initial active index with release ordering so both filled
+     * buffers' data[] writes are visible to a consumer that acquires it. */
+    atomic_store_explicit(&g_buffer.active, 0U, memory_order_release);
+    set_state(BUFFER_STATE_READY);
     return true;
 }
 
 uint16_t *AudioBuffer_GetBuffer(void) {
-    return g_buffer.data[g_buffer.active];
+    /* Acquire the active index published by AudioBuffer_Done() so that the
+     * producer's data[] writes for that buffer are visible to this consumer. */
+    size_t active = atomic_load_explicit(&g_buffer.active, memory_order_acquire);
+    return g_buffer.data[active];
 }
 
 bool AudioBuffer_Done(void) {
-    printf("AudioBuffer_Done called\n");
     if (!g_buffer.initialised) {
         printf("Audio buffer not initialized\n");
         return false;
     }
 
-    size_t consumed_index = g_buffer.active;
+    size_t consumed_index = atomic_load_explicit(&g_buffer.active,
+                                                 memory_order_relaxed);
     size_t next_index = (consumed_index + 1U) % DMA_BUFFER_COUNT;
 
-    printf("Switching from buffer %zu to buffer %zu\n", consumed_index, next_index);
-
-    g_buffer.active = next_index;
-
-    if (g_buffer.valid_frames[next_index] == 0U && g_buffer.end_of_stream) {
-        printf("End of stream reached\n");
-        g_buffer.state = BUFFER_STATE_END_OF_STREAM;
+    size_t next_valid = atomic_load_explicit(&g_buffer.valid_frames[next_index],
+                                             memory_order_relaxed);
+    bool eos = atomic_load_explicit(&g_buffer.end_of_stream, memory_order_relaxed);
+    if (next_valid == 0U && eos) {
+        set_state(BUFFER_STATE_END_OF_STREAM);
+        /* Still publish the flip so the consumer sees the (silent) buffer. */
+        atomic_store_explicit(&g_buffer.active, next_index, memory_order_release);
         return false;
     }
+
+    /* Publish the flip to the next buffer with release ordering. The next
+     * buffer was filled by a prior fill_buffer() whose writes are ordered
+     * before this store, so the consumer's acquire load sees valid data. */
+    atomic_store_explicit(&g_buffer.active, next_index, memory_order_release);
 
     if (!fill_buffer(consumed_index)) {
-        printf("Failed to fill buffer %zu\n", consumed_index);
-        g_buffer.state = BUFFER_STATE_END_OF_STREAM;
-        return false;
+        /* The buffer we just refilled came up empty: no more audio. We do not
+         * fail here because the freshly-activated next_index buffer is still
+         * valid to play; end_of_stream is now set so the *following* Done()
+         * will report EOS once that buffer drains. */
+        set_state(BUFFER_STATE_PLAYING);
+        return true;
     }
 
-    g_buffer.state = BUFFER_STATE_PLAYING;
-    printf("Buffer ready, state: PLAYING\n");
+    set_state(BUFFER_STATE_PLAYING);
     return true;
 }
 
@@ -166,29 +247,34 @@ bool AudioBuffer_ProcessComplete(void) {
 }
 
 void AudioBuffer_Update(void) {
-    update_utilisation(g_buffer.valid_frames[g_buffer.active]);
+    size_t active = atomic_load_explicit(&g_buffer.active, memory_order_relaxed);
+    update_utilisation(atomic_load_explicit(&g_buffer.valid_frames[active],
+                                            memory_order_relaxed));
 }
 
 bool AudioBuffer_IsUnderThreshold(void) {
-    return g_buffer.valid_frames[g_buffer.active] <= g_buffer.low_threshold;
+    size_t active = atomic_load_explicit(&g_buffer.active, memory_order_relaxed);
+    return atomic_load_explicit(&g_buffer.valid_frames[active],
+                                memory_order_relaxed) <= g_buffer.low_threshold;
 }
 
 void AudioBuffer_HandleUnderrun(void) {
     uint32_t start = platform_get_time_ms();
 
-    g_buffer.state = BUFFER_STATE_UNDERRUN;
+    set_state(BUFFER_STATE_UNDERRUN);
     g_buffer.errors.total_underruns++;
     g_buffer.stats.underruns++;
 
-    memset(g_buffer.data[g_buffer.active], 0, AUDIO_BUFFER_BYTES);
+    size_t active = atomic_load_explicit(&g_buffer.active, memory_order_relaxed);
+    memset(g_buffer.data[active], 0, AUDIO_BUFFER_BYTES);
 
     g_buffer.underrun.timestamp_ms = start;
     /* One full buffer was zero-filled; report the loss as a frame count
      * (the public field is historically named "samples_lost"). */
     g_buffer.underrun.samples_lost = AUDIO_BUFFER_FRAMES;
 
-    if (!fill_buffer(g_buffer.active)) {
-        g_buffer.end_of_stream = true;
+    if (!fill_buffer(active)) {
+        atomic_store_explicit(&g_buffer.end_of_stream, true, memory_order_relaxed);
     }
 
     g_buffer.underrun.recovery_ms = platform_get_time_ms() - start;
@@ -215,19 +301,19 @@ bool AudioBuffer_Seek(size_t position_in_samples) {
         }
     }
 
-    g_buffer.end_of_stream = false;
-    g_buffer.state = BUFFER_STATE_EMPTY;
+    atomic_store_explicit(&g_buffer.end_of_stream, false, memory_order_relaxed);
+    set_state(BUFFER_STATE_EMPTY);
     return AudioBuffer_StartPlayback();
 }
 
 void AudioBuffer_Pause(void) {
-    if (g_buffer.state == BUFFER_STATE_PLAYING) {
-        g_buffer.state = BUFFER_STATE_READY;
+    if (get_state() == BUFFER_STATE_PLAYING) {
+        set_state(BUFFER_STATE_READY);
     }
 }
 
 BufferState AudioBuffer_GetState(void) {
-    return g_buffer.state;
+    return get_state();
 }
 
 void AudioBuffer_ResetBufferStats(void) {
@@ -374,10 +460,12 @@ void AudioBuffer_GetSampleFormat(uint8_t *bits_per_sample,
 
 bool AudioBuffer_Flush(bool reset_stats) {
     memset(g_buffer.data, 0, sizeof(g_buffer.data));
-    memset(g_buffer.valid_frames, 0, sizeof(g_buffer.valid_frames));
-    g_buffer.active = 0U;
-    g_buffer.end_of_stream = false;
-    g_buffer.state = BUFFER_STATE_EMPTY;
+    for (size_t i = 0; i < DMA_BUFFER_COUNT; i++) {
+        atomic_store_explicit(&g_buffer.valid_frames[i], 0U, memory_order_relaxed);
+    }
+    atomic_store_explicit(&g_buffer.active, 0U, memory_order_release);
+    atomic_store_explicit(&g_buffer.end_of_stream, false, memory_order_relaxed);
+    set_state(BUFFER_STATE_EMPTY);
 
     if (reset_stats) {
         AudioBuffer_ResetBufferStats();
@@ -438,8 +526,8 @@ bool AudioBuffer_SetDecoder(FormatDecoder* decoder) {
     }
 
     g_buffer.decoder = decoder;
-    g_buffer.end_of_stream = false;
-    g_buffer.state = BUFFER_STATE_EMPTY;
+    atomic_store_explicit(&g_buffer.end_of_stream, false, memory_order_relaxed);
+    set_state(BUFFER_STATE_EMPTY);
     return true;
 }
 
@@ -449,12 +537,45 @@ void AudioBuffer_ClearDecoder(void) {
         format_decoder_destroy(g_buffer.decoder);
         g_buffer.decoder = NULL;
     }
-    g_buffer.end_of_stream = false;
-    g_buffer.state = BUFFER_STATE_EMPTY;
+    atomic_store_explicit(&g_buffer.end_of_stream, false, memory_order_relaxed);
+    set_state(BUFFER_STATE_EMPTY);
 }
 
 FormatDecoder* AudioBuffer_GetDecoder(void) {
     return g_buffer.decoder;
+}
+
+void AudioBuffer_SetVolume(uint8_t percent) {
+    if (percent > VOLUME_MAX_PERCENT) {
+        percent = VOLUME_MAX_PERCENT;
+    }
+    /* Atomic target; the producer reads it once per block and ramps toward it. */
+    atomic_store_explicit(&g_buffer.volume_percent, percent, memory_order_relaxed);
+}
+
+uint8_t AudioBuffer_GetVolume(void) {
+    return atomic_load_explicit(&g_buffer.volume_percent, memory_order_relaxed);
+}
+
+void AudioBuffer_SetNextTrackProvider(AudioBufferNextTrackProvider provider,
+                                      void* user_data) {
+    /* Set on the control thread before playback; read by the producer on EOF. */
+    g_buffer.next_track_provider = provider;
+    g_buffer.next_track_user_data = user_data;
+}
+
+uint32_t AudioBuffer_GetTrackChangeCount(void) {
+    return atomic_load_explicit(&g_buffer.track_change_count, memory_order_relaxed);
+}
+
+bool AudioBuffer_ConsumeTrackChanged(void) {
+    uint32_t now = atomic_load_explicit(&g_buffer.track_change_count,
+                                        memory_order_relaxed);
+    if (now != g_buffer.track_change_seen) {
+        g_buffer.track_change_seen = now;
+        return true;
+    }
+    return false;
 }
 
 static void reset_internal_state(void) {
@@ -473,10 +594,54 @@ static void reset_internal_state(void) {
     g_buffer.format.ratio = 1.0f;
     g_buffer.next_track_available = false;
     g_buffer.decoder = NULL;
+
+    /* Default master volume is 100% == bit-exact passthrough so nothing
+     * regresses; start the ramp already at unity to avoid a fade-in. */
+    atomic_store_explicit(&g_buffer.volume_percent, VOLUME_MAX_PERCENT,
+                          memory_order_relaxed);
+    g_buffer.applied_gain = 1.0f;
+
+    g_buffer.next_track_provider = NULL;
+    g_buffer.next_track_user_data = NULL;
+    atomic_store_explicit(&g_buffer.track_change_count, 0U, memory_order_relaxed);
+    g_buffer.track_change_seen = 0U;
+}
+
+/*
+ * Gapless transition: the active decoder has hit EOF. Ask the registered
+ * provider for the next track's decoder. On success, the old decoder is
+ * destroyed, the new one installed, the track-change counter bumped, and true
+ * is returned so the caller keeps filling the *same* output buffer from the new
+ * decoder - no silence gap. Returns false when there is no provider or no next
+ * track (true end of library), leaving the caller to zero-pad and stop.
+ */
+static bool advance_to_next_track(void) {
+    if (!g_buffer.next_track_provider) {
+        return false;
+    }
+
+    FormatDecoder* next = g_buffer.next_track_provider(g_buffer.next_track_user_data);
+    if (!next) {
+        return false;  // end of library: drain cleanly
+    }
+
+    if (g_buffer.decoder) {
+        format_decoder_close(g_buffer.decoder);
+        format_decoder_destroy(g_buffer.decoder);
+    }
+    g_buffer.decoder = next;
+
+    /* Publish the transition so a UI poll loop can refresh "Now Playing". */
+    atomic_fetch_add_explicit(&g_buffer.track_change_count, 1U,
+                              memory_order_relaxed);
+    return true;
 }
 
 static bool fill_buffer(size_t index) {
     printf("fill_buffer called for index %zu\n", index);
+
+    /* Snapshot the master-volume gain once per block (ramped toward target). */
+    const float gain = advance_volume_gain();
 
     if (!g_buffer.decoder) {
         printf("No decoder available, using fallback\n");
@@ -485,13 +650,24 @@ static bool fill_buffer(size_t index) {
         size_t samples_read = bytes_read / sizeof(uint16_t);
         size_t frames_read = samples_read / AUDIO_OUT_CHANNELS;
 
+        /* Apply master volume to the raw S16 stream as well. Skip the scan at
+         * unity gain so the default path stays bit-exact. */
+        if (gain < 1.0f) {
+            for (size_t s = 0; s < samples_read; s++) {
+                int16_t v = (int16_t)g_buffer.data[index][s];
+                g_buffer.data[index][s] = (uint16_t)(int16_t)((float)v * gain);
+            }
+        }
+
         if (samples_read < AUDIO_BUFFER_SIZE) {
             size_t remaining = AUDIO_BUFFER_SIZE - samples_read;
             memset(&g_buffer.data[index][samples_read], 0, remaining * sizeof(uint16_t));
-            g_buffer.end_of_stream = (frames_read == 0U);
+            atomic_store_explicit(&g_buffer.end_of_stream, (frames_read == 0U),
+                                  memory_order_relaxed);
         }
 
-        g_buffer.valid_frames[index] = frames_read;
+        atomic_store_explicit(&g_buffer.valid_frames[index], frames_read,
+                              memory_order_relaxed);
         g_buffer.stats.total_samples += frames_read;
         printf("Fallback read: %zu frames\n", frames_read);
         return frames_read > 0U;
@@ -499,26 +675,36 @@ static bool fill_buffer(size_t index) {
 
     // Use format decoder to get decoded audio data (downmix to stereo if needed)
     size_t frames_read_total = 0;
-    uint32_t channels = format_decoder_get_channels(g_buffer.decoder);
-    if (channels == 0U) {
-        channels = AUDIO_OUT_CHANNELS;
-    }
-    if (channels > 8U) {
-        printf("Unsupported channel count: %u\n", channels);
-        g_buffer.end_of_stream = true;
-        return false;
-    }
 
     static float decode_buffer[AUDIO_BUFFER_FRAMES * 8U];
 
     printf("Using format decoder...\n");
     while (frames_read_total < AUDIO_BUFFER_FRAMES) {
+        // Channel count is re-read every iteration because a gapless transition
+        // mid-fill can swap in a decoder with a different channel layout.
+        uint32_t channels = format_decoder_get_channels(g_buffer.decoder);
+        if (channels == 0U) {
+            channels = AUDIO_OUT_CHANNELS;
+        }
+        if (channels > 8U) {
+            printf("Unsupported channel count: %u\n", channels);
+            break;  // stop filling; zero-pad below
+        }
+
         size_t frames_to_read = AUDIO_BUFFER_FRAMES - frames_read_total;
         // Read interleaved float frames (channels from decoder)
         size_t frames_read = format_decoder_read(g_buffer.decoder, decode_buffer, frames_to_read);
 
         if (frames_read == 0) {
-            printf("No more frames from decoder\n");
+            // Current decoder is exhausted. Try to advance to the next track and
+            // keep filling this same buffer for gapless playback. If there is no
+            // next track, fall through and zero-pad the remainder.
+            printf("Decoder EOF; attempting gapless advance\n");
+            if (advance_to_next_track()) {
+                printf("Gapless: advanced to next track, continuing fill\n");
+                continue;
+            }
+            printf("No next track; ending stream\n");
             break;
         }
 
@@ -545,6 +731,10 @@ static bool fill_buffer(size_t index) {
                 right *= scale;
             }
 
+            // Apply master volume in the float domain before clamping/quantising.
+            left *= gain;
+            right *= gain;
+
             if (left > 1.0f) left = 1.0f;
             if (left < -1.0f) left = -1.0f;
             if (right > 1.0f) right = 1.0f;
@@ -567,10 +757,12 @@ static bool fill_buffer(size_t index) {
         memset(&g_buffer.data[index][frames_read_total * AUDIO_OUT_CHANNELS],
                0,
                remaining_samples * sizeof(uint16_t));
-        g_buffer.end_of_stream = (frames_read_total == 0U);
+        atomic_store_explicit(&g_buffer.end_of_stream, (frames_read_total == 0U),
+                              memory_order_relaxed);
     }
 
-    g_buffer.valid_frames[index] = frames_read_total;
+    atomic_store_explicit(&g_buffer.valid_frames[index], frames_read_total,
+                          memory_order_relaxed);
     g_buffer.stats.total_samples += frames_read_total;
     printf("Buffer filled with %zu frames\n", frames_read_total);
     return frames_read_total > 0U;

@@ -29,6 +29,8 @@ static void set_state(PipelineState new_state);
 static bool ensure_buffer_ready(void);
 static void configure_codec(uint32_t sample_rate, uint8_t bit_depth);
 static void update_next_track_status(void);
+static FormatDecoder* open_decoder_for_current_track(void);
+static FormatDecoder* gapless_next_track_provider(void* user_data);
 
 bool AudioPipeline_Init(void) {
     printf("AudioPipeline_Init starting...\n");
@@ -37,7 +39,7 @@ bool AudioPipeline_Init(void) {
 
     g_pipeline.config.sample_rate = SAMPLE_RATE;
     g_pipeline.config.bit_depth = 16U;
-    g_pipeline.config.gapless_enabled = false;
+    g_pipeline.config.gapless_enabled = true;
     g_pipeline.config.crossfade_enabled = false;
 
     printf("Initializing audio buffer...\n");
@@ -46,6 +48,10 @@ bool AudioPipeline_Init(void) {
         return false;
     }
     printf("Audio buffer initialized\n");
+
+    /* Register the gapless next-track provider so the buffer producer can
+     * transparently advance to the next track on EOF without silence. */
+    AudioBuffer_SetNextTrackProvider(gapless_next_track_provider, NULL);
 
     printf("Initializing audio codec...\n");
     if (!AudioCodec_Init(g_pipeline.config.sample_rate, g_pipeline.config.bit_depth)) {
@@ -82,28 +88,16 @@ bool AudioPipeline_Play(void) {
     // Create and set up format decoder for the current track if not already done
     const MusicLibraryTrack* track = MusicLibrary_GetCurrentTrack();
     if (track && !AudioBuffer_GetDecoder()) {  // Check if decoder is already set
-        FormatDecoder* decoder = format_decoder_create();
+        FormatDecoder* decoder = open_decoder_for_current_track();
         if (decoder) {
-            char full_path[PATH_MAX];
-            if (MusicLibrary_GetRoot() && strlen(MusicLibrary_GetRoot()) > 0) {
-                snprintf(full_path, sizeof(full_path), "%s/%s", MusicLibrary_GetRoot(), track->filename);
-            } else {
-                strncpy(full_path, track->filename, sizeof(full_path) - 1);
-                full_path[sizeof(full_path) - 1] = '\0';
-            }
-
-            if (format_decoder_open(decoder, full_path)) {
-                uint32_t sample_rate = format_decoder_get_sample_rate(decoder);
-                if (sample_rate != 0U && sample_rate != g_pipeline.config.sample_rate) {
-                    if (!AudioPipeline_ReconfigureFormat(sample_rate, g_pipeline.config.bit_depth)) {
-                        format_decoder_destroy(decoder);
-                        return false;
-                    }
+            uint32_t sample_rate = format_decoder_get_sample_rate(decoder);
+            if (sample_rate != 0U && sample_rate != g_pipeline.config.sample_rate) {
+                if (!AudioPipeline_ReconfigureFormat(sample_rate, g_pipeline.config.bit_depth)) {
+                    format_decoder_destroy(decoder);
+                    return false;
                 }
-                AudioBuffer_SetDecoder(decoder);
-            } else {
-                format_decoder_destroy(decoder);
             }
+            AudioBuffer_SetDecoder(decoder);
         }
     }
 
@@ -164,6 +158,20 @@ bool AudioPipeline_Skip(void) {
 
     update_next_track_status();
 
+    /* Install a decoder for the newly-selected track before refilling, so the
+     * buffer plays the new track rather than the stale previous decoder. */
+    FormatDecoder* decoder = open_decoder_for_current_track();
+    if (decoder) {
+        uint32_t sample_rate = format_decoder_get_sample_rate(decoder);
+        if (sample_rate != 0U && sample_rate != g_pipeline.config.sample_rate) {
+            if (!AudioPipeline_ReconfigureFormat(sample_rate, g_pipeline.config.bit_depth)) {
+                format_decoder_destroy(decoder);
+                return false;
+            }
+        }
+        AudioBuffer_SetDecoder(decoder);  // closes/destroys any previous decoder
+    }
+
     if (!AudioBuffer_Flush(false)) {
         return false;
     }
@@ -181,6 +189,18 @@ bool AudioPipeline_Previous(void) {
     }
 
     update_next_track_status();
+
+    FormatDecoder* decoder = open_decoder_for_current_track();
+    if (decoder) {
+        uint32_t sample_rate = format_decoder_get_sample_rate(decoder);
+        if (sample_rate != 0U && sample_rate != g_pipeline.config.sample_rate) {
+            if (!AudioPipeline_ReconfigureFormat(sample_rate, g_pipeline.config.bit_depth)) {
+                format_decoder_destroy(decoder);
+                return false;
+            }
+        }
+        AudioBuffer_SetDecoder(decoder);  // closes/destroys any previous decoder
+    }
 
     if (!AudioBuffer_Flush(false)) {
         return false;
@@ -205,34 +225,21 @@ bool AudioPipeline_PlayTrack(size_t track_index) {
     const MusicLibraryTrack* track = MusicLibrary_GetCurrentTrack();
     if (track) {
         printf("Track: %s - %s by %s\n", track->title, track->album, track->artist);
-        char full_path[PATH_MAX];
-        if (MusicLibrary_GetRoot() && strlen(MusicLibrary_GetRoot()) > 0) {
-            snprintf(full_path, sizeof(full_path), "%s/%s", MusicLibrary_GetRoot(), track->filename);
-        } else {
-            strncpy(full_path, track->filename, sizeof(full_path) - 1);
-            full_path[sizeof(full_path) - 1] = '\0';
-        }
-        printf("Opening file: %s\n", full_path);
 
-        FormatDecoder* decoder = format_decoder_create();
+        FormatDecoder* decoder = open_decoder_for_current_track();
         if (decoder) {
-            if (format_decoder_open(decoder, full_path)) {
-                printf("Successfully opened decoder\n");
-                uint32_t sample_rate = format_decoder_get_sample_rate(decoder);
-                if (sample_rate != 0U && sample_rate != g_pipeline.config.sample_rate) {
-                    if (!AudioPipeline_ReconfigureFormat(sample_rate, g_pipeline.config.bit_depth)) {
-                        printf("Failed to reconfigure format\n");
-                        format_decoder_destroy(decoder);
-                        return false;
-                    }
+            printf("Successfully opened decoder\n");
+            uint32_t sample_rate = format_decoder_get_sample_rate(decoder);
+            if (sample_rate != 0U && sample_rate != g_pipeline.config.sample_rate) {
+                if (!AudioPipeline_ReconfigureFormat(sample_rate, g_pipeline.config.bit_depth)) {
+                    printf("Failed to reconfigure format\n");
+                    format_decoder_destroy(decoder);
+                    return false;
                 }
-                AudioBuffer_SetDecoder(decoder);
-            } else {
-                printf("Failed to open decoder\n");
-                format_decoder_destroy(decoder);
             }
+            AudioBuffer_SetDecoder(decoder);
         } else {
-            printf("Failed to create decoder\n");
+            printf("Failed to open decoder for current track\n");
         }
     } else {
         printf("No track found for index %zu\n", track_index);
@@ -250,7 +257,28 @@ bool AudioPipeline_PlayTrack(size_t track_index) {
 }
 
 bool AudioPipeline_SetVolume(uint8_t volume) {
-    return AudioCodec_SetVolume(volume);
+    if (volume > 100U) {
+        volume = 100U;
+    }
+    /* Apply software master volume in the buffer producer (the gain that
+     * actually shapes the PCM the consumer plays), and forward to the codec so
+     * any hardware attenuator stays in sync. The codec is a stub in the sim, so
+     * its result must not gate volume; the software gain is the source of truth. */
+    AudioBuffer_SetVolume(volume);
+    (void)AudioCodec_SetVolume(volume);
+    return true;
+}
+
+uint8_t AudioPipeline_GetVolume(void) {
+    return AudioBuffer_GetVolume();
+}
+
+bool AudioPipeline_ConsumeTrackChanged(void) {
+    return AudioBuffer_ConsumeTrackChanged();
+}
+
+uint32_t AudioPipeline_GetTrackChangeCount(void) {
+    return AudioBuffer_GetTrackChangeCount();
 }
 
 bool AudioPipeline_Configure(const AudioPipelineConfig *config) {
@@ -278,9 +306,28 @@ void AudioPipeline_HandleUnderrun(void) {
 }
 
 void AudioPipeline_HandleEndOfFile(void) {
+    /*
+     * With gapless enabled the buffer producer advances tracks itself, so this
+     * path is normally only reached at the genuine end of the library (the
+     * provider returned NULL -> EOS). It is kept as a fallback for when gapless
+     * is disabled: it advances the library AND installs a fresh decoder so the
+     * old track is not replayed.
+     */
     g_pipeline.transition_pending = false;
     if (MusicLibrary_OpenNextTrack()) {
         update_next_track_status();
+
+        FormatDecoder* decoder = open_decoder_for_current_track();
+        if (decoder) {
+            uint32_t sample_rate = format_decoder_get_sample_rate(decoder);
+            if (sample_rate == 0U || sample_rate == g_pipeline.config.sample_rate ||
+                AudioPipeline_ReconfigureFormat(sample_rate, g_pipeline.config.bit_depth)) {
+                AudioBuffer_SetDecoder(decoder);
+            } else {
+                format_decoder_destroy(decoder);
+            }
+        }
+
         if (!AudioBuffer_Flush(false)) {
             g_pipeline.end_of_playlist = true;
             set_state(PIPELINE_STATE_STOPPED);
@@ -431,4 +478,65 @@ static void update_next_track_status(void) {
     bool has_next = MusicLibrary_HasNextTrack();
     size_t remaining = MusicLibrary_GetRemainingTracks();
     AudioBuffer_SetNextTrackAvailability(has_next, remaining);
+}
+
+/*
+ * Create and open a FormatDecoder for whatever track is currently selected in
+ * the music library. Returns NULL on failure (file missing, unknown format).
+ * Shared by AudioPipeline_Play / _PlayTrack and the gapless provider so the
+ * path-resolution / open logic lives in one place.
+ */
+static FormatDecoder* open_decoder_for_current_track(void) {
+    const MusicLibraryTrack* track = MusicLibrary_GetCurrentTrack();
+    if (!track) {
+        return NULL;
+    }
+
+    FormatDecoder* decoder = format_decoder_create();
+    if (!decoder) {
+        return NULL;
+    }
+
+    char full_path[PATH_MAX];
+    if (MusicLibrary_GetRoot() && strlen(MusicLibrary_GetRoot()) > 0) {
+        snprintf(full_path, sizeof(full_path), "%s/%s",
+                 MusicLibrary_GetRoot(), track->filename);
+    } else {
+        strncpy(full_path, track->filename, sizeof(full_path) - 1);
+        full_path[sizeof(full_path) - 1] = '\0';
+    }
+
+    if (!format_decoder_open(decoder, full_path)) {
+        format_decoder_destroy(decoder);
+        return NULL;
+    }
+
+    return decoder;
+}
+
+/*
+ * Gapless next-track provider, invoked by the audio buffer's producer when the
+ * current decoder hits EOF. Advances the music library to the next track and
+ * returns an opened decoder for it, or NULL at the end of the library (which
+ * lets the buffer drain to end-of-stream cleanly - no infinite loop).
+ *
+ * Runs on the producer thread, so it must not touch the pipeline state machine.
+ * The track change is observable via AudioBuffer_GetTrackChangeCount() /
+ * AudioPipeline_ConsumeTrackChanged(); pipeline state is reconciled lazily by
+ * AudioPipeline_SynchronizeState().
+ */
+static FormatDecoder* gapless_next_track_provider(void* user_data) {
+    (void)user_data;
+
+    if (!MusicLibrary_OpenNextTrack()) {
+        return NULL;  // end of library
+    }
+
+    FormatDecoder* decoder = open_decoder_for_current_track();
+    if (!decoder) {
+        return NULL;
+    }
+
+    update_next_track_status();
+    return decoder;
 }

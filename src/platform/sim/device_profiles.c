@@ -51,32 +51,38 @@ static ThemePalette make_theme(ThemeKind kind) {
 static void apply_body(ChassisStyle *c, WheelLayout *w, BodyKind body) {
     switch (body) {
         case BODY_WHITE:
-            c->bodyTop    = RGB(238, 239, 242);
-            c->bodyBottom = RGB(206, 208, 214);
+            /* Glossy white polycarbonate (1G-5G, photo). */
+            c->bodyTop    = RGB(248, 249, 251);
+            c->bodyBottom = RGB(214, 217, 223);
             c->bezelColor = RGB(150, 152, 160);
-            w->ringLight  = RGB(238, 239, 242);
-            w->ringDark   = RGB(198, 200, 207);
-            w->hubColor   = RGB(246, 247, 250);
-            w->labelColor = RGB(70, 72, 80);
+            c->material   = MATERIAL_PLASTIC_GLOSS;
+            w->ringLight  = RGB(245, 246, 249);
+            w->ringDark   = RGB(206, 209, 216);
+            w->hubColor   = RGB(250, 251, 253);
+            w->labelColor = RGB(96, 99, 108);
             break;
         case BODY_SILVER:
-            c->bodyTop    = RGB(222, 224, 229);
-            c->bodyBottom = RGB(178, 181, 189);
-            c->bezelColor = RGB(132, 134, 142);
-            w->ringLight  = RGB(220, 222, 227);
-            w->ringDark   = RGB(176, 179, 186);
-            w->hubColor   = RGB(234, 236, 240);
-            w->labelColor = RGB(54, 56, 64);
+            /* Anodized aluminium (mini base, classic). */
+            c->bodyTop    = RGB(228, 230, 234);
+            c->bodyBottom = RGB(182, 186, 193);
+            c->bezelColor = RGB(120, 123, 131);
+            c->material   = MATERIAL_ALUMINIUM;
+            w->ringLight  = RGB(226, 228, 233);
+            w->ringDark   = RGB(180, 184, 191);
+            w->hubColor   = RGB(236, 238, 242);
+            w->labelColor = RGB(70, 73, 82);
             break;
         case BODY_BLACK:
         default:
-            c->bodyTop    = RGB(58, 60, 66);
-            c->bodyBottom = RGB(28, 29, 34);
-            c->bezelColor = RGB(12, 12, 16);
-            w->ringLight  = RGB(86, 88, 96);
-            w->ringDark   = RGB(44, 46, 52);
-            w->hubColor   = RGB(96, 98, 106);
-            w->labelColor = RGB(225, 226, 232);
+            /* Glossy black plastic (nano 1G). */
+            c->bodyTop    = RGB(48, 50, 56);
+            c->bodyBottom = RGB(20, 21, 26);
+            c->bezelColor = RGB(10, 10, 14);
+            c->material   = MATERIAL_PLASTIC_GLOSS;
+            w->ringLight  = RGB(78, 80, 90);
+            w->ringDark   = RGB(34, 36, 42);
+            w->hubColor   = RGB(90, 92, 102);
+            w->labelColor = RGB(214, 216, 224);
             break;
     }
 }
@@ -104,16 +110,17 @@ static NunoColor shade(NunoColor c, int delta) {
  * mid-tone `base` colour. This makes adding a finish a one-line append.
  */
 static void apply_tint(ChassisStyle *c, WheelLayout *w, NunoColor base) {
-    c->bodyTop    = shade(base, 26);
-    c->bodyBottom = shade(base, -28);
-    c->bezelColor = shade(base, -70);
-    w->ringLight  = shade(base, 22);
-    w->ringDark   = shade(base, -26);
-    w->hubColor   = shade(base, 40);
+    c->bodyTop    = shade(base, 30);
+    c->bodyBottom = shade(base, -30);
+    c->bezelColor = shade(base, -74);
+    c->material   = MATERIAL_ALUMINIUM;
+    w->ringLight  = shade(base, 26);
+    w->ringDark   = shade(base, -28);
+    w->hubColor   = shade(base, 44);
     /* Keep wheel labels readable: dark on light tints, light on dark ones. */
     int luma = (3 * base.r + 6 * base.g + base.b) / 10;
-    w->labelColor = (luma >= 140) ? (NunoColor){ 54, 56, 64, 255 }
-                                  : (NunoColor){ 232, 233, 238, 255 };
+    w->labelColor = (luma >= 140) ? (NunoColor){ 52, 54, 62, 255 }
+                                  : (NunoColor){ 234, 235, 240, 255 };
 }
 
 /* ------------------------------------------------------------------ */
@@ -172,6 +179,20 @@ static DeviceProfile build(const char *id, const char *name, int year,
     p.chassis.canvasHeight = p.wheel.centerY + outerR + bottomMargin;
     p.chassis.windowScale = (canvasW <= 240) ? 3 : 2;
     p.chassis.faceplateImage = NULL;
+
+    /*
+     * High-fidelity body framing: the device floats inside the canvas over a
+     * drop shadow, with rounded corners. Inset and radius scale with the body so
+     * small minis and large 5G/classic bodies keep believable proportions. The
+     * renderer falls back to these same defaults if left zero, but pinning them
+     * here keeps geometry consistent and lets per-gen tuning live in one place.
+     */
+    p.chassis.bodyInset = clampi(canvasW / 24, 7, 18);
+    p.chassis.cornerRadius = clampi((canvasW * 9) / 100, 14, 40);
+
+    /* Neutral studio backdrop the device sits on. */
+    p.chassis.backdropTop    = RGB(214, 216, 220);
+    p.chassis.backdropBottom = RGB(176, 178, 184);
 
     p.theme = make_theme(themeKind);
     apply_body(&p.chassis, &p.wheel, body);

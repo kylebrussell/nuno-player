@@ -78,6 +78,8 @@ engine renders each generation authentically:
 - `Enter` – select menu item
 - `Backspace` or `Esc` – go back
 - `Space` – toggle play/pause state indicator
+- In **Now Playing**, the wheel/scroll adjusts volume (like a real iPod); the
+  audio engine applies the gain in software. Track changes are gapless.
 
 ### Simulator Trackpad Mode (experimental)
 - Press `t` to toggle square trackpad mode on/off

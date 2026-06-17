@@ -132,6 +132,21 @@ static bool applyRotationEvent(UIState *state, int8_t direction, uint32_t timest
         return false;
     }
 
+    // In Now Playing the wheel adjusts volume (classic iPod behavior) rather
+    // than scrolling a list. Clockwise (direction > 0) raises volume.
+    if (state->currentMenuType == MENU_NOW_PLAYING) {
+        int delta = (direction > 0) ? 5 : -5;
+        int next = (int)state->volume + delta;
+        if (next < 0) next = 0;
+        if (next > 100) next = 100;
+        if ((uint8_t)next == state->volume) {
+            return false;
+        }
+        AudioPipeline_SetVolume((uint8_t)next);
+        updateVolume(state, (uint8_t)next);
+        return true;
+    }
+
     uint8_t previousIndex = state->currentMenu.selectedIndex;
     uint8_t previousOffset = state->currentMenu.scrollOffset;
 
@@ -158,6 +173,17 @@ bool processUIEvents(UIState* state, uint32_t currentTime) {
     }
 
     bool changed = false;
+
+    // Gapless playback advances the library on the audio thread; reflect the
+    // new track in the UI when the pipeline signals a transition.
+    if (AudioPipeline_ConsumeTrackChanged()) {
+        const MusicLibraryTrack *track = MusicLibrary_GetCurrentTrack();
+        if (track) {
+            updateTrackInfo(state, track->title, track->artist, track->album);
+        }
+        changed = true;
+    }
+
     UIEvent event;
     while (dequeueEvent(&event)) {
         switch (event.type) {

@@ -11,9 +11,83 @@
 #include <stdio.h>
 #include <string.h>
 
+/* High-fidelity procedural chassis (header-only software AA renderer). */
+#include "chassis_render.h"
+#include "chassis_scene.h"
+
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
 static const DeviceProfile *g_profile = NULL;
+
+/* ------------------------------------------------------------------ */
+/* High-fidelity chassis layer                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The chassis (body, bezel, wheel) is rasterised with anti-aliasing into a CPU
+ * ARGB buffer at the *window* output resolution, then uploaded to a streaming
+ * texture and blitted 1:1 over the whole window with the logical-size mapping
+ * temporarily disabled. Building at output resolution (rather than the logical
+ * canvas) means our soft AA edges land on real device pixels instead of being
+ * nearest-upscaled into blocks. The pixel-font screen UI keeps drawing on the
+ * normal logical/nearest path afterwards, so glyphs stay crisp.
+ *
+ * Two buffers/textures: the body+bezel layer (rebuilt only when the profile or
+ * size changes) and the wheel layer (rebuilt when the pressed button changes).
+ */
+typedef struct {
+    SDL_Texture *tex;
+    uint32_t    *px;
+    int          w, h;
+} ChassisLayer;
+
+static ChassisLayer g_bodyLayer  = {0};
+static ChassisLayer g_wheelLayer = {0};
+static const DeviceProfile *g_bodyBuiltFor  = NULL;
+static const DeviceProfile *g_wheelBuiltFor = NULL;
+static int g_wheelBuiltButton = -1;
+
+static int outputScale(void) {
+    const DeviceProfile *p = Display_GetActiveProfile();
+    return p->chassis.windowScale > 0 ? p->chassis.windowScale : 2;
+}
+
+static void chassisLayerFree(ChassisLayer *layer) {
+    if (layer->tex) { SDL_DestroyTexture(layer->tex); layer->tex = NULL; }
+    if (layer->px)  { free(layer->px); layer->px = NULL; }
+    layer->w = layer->h = 0;
+}
+
+/* Ensure `layer` has a CPU buffer + linear-filtered texture of size w*h. */
+static bool chassisLayerEnsure(ChassisLayer *layer, int w, int h) {
+    if (layer->w == w && layer->h == h && layer->tex && layer->px) {
+        return true;
+    }
+    chassisLayerFree(layer);
+    layer->px = (uint32_t *)calloc((size_t)w * (size_t)h, sizeof(uint32_t));
+    if (!layer->px) return false;
+    layer->tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                                   SDL_TEXTUREACCESS_STREAMING, w, h);
+    if (!layer->tex) { free(layer->px); layer->px = NULL; return false; }
+    SDL_SetTextureBlendMode(layer->tex, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(layer->tex, SDL_ScaleModeLinear);
+    layer->w = w; layer->h = h;
+    return true;
+}
+
+/* Upload the layer buffer and blit it 1:1 over the full window, bypassing the
+ * logical-size mapping so the AA pixels map to real output pixels. */
+static void chassisLayerBlit(ChassisLayer *layer) {
+    if (!renderer || !layer->tex || !layer->px) return;
+    SDL_UpdateTexture(layer->tex, NULL, layer->px,
+                      layer->w * (int)sizeof(uint32_t));
+    int lw = 0, lh = 0;
+    SDL_RenderGetLogicalSize(renderer, &lw, &lh);
+    SDL_RenderSetLogicalSize(renderer, 0, 0); /* draw in real output pixels */
+    SDL_Rect dst = { 0, 0, layer->w, layer->h };
+    SDL_RenderCopy(renderer, layer->tex, NULL, &dst);
+    SDL_RenderSetLogicalSize(renderer, lw, lh); /* restore for screen UI */
+}
 
 /* ------------------------------------------------------------------ */
 /* Active profile + geometry accessors                                */
@@ -201,92 +275,48 @@ static void drawGlyphScaled(const GlyphPattern *glyph, int originX, int originY,
     }
 }
 
-static void drawCircleOutline(int cx, int cy, int radius, SDL_Color color) {
-    if (!renderer) return;
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
-    int x = radius;
-    int y = 0;
-    int decision = 1 - radius;
-    while (x >= y) {
-        SDL_RenderDrawPoint(renderer, cx + x, cy + y);
-        SDL_RenderDrawPoint(renderer, cx + y, cy + x);
-        SDL_RenderDrawPoint(renderer, cx - y, cy + x);
-        SDL_RenderDrawPoint(renderer, cx - x, cy + y);
-        SDL_RenderDrawPoint(renderer, cx - x, cy - y);
-        SDL_RenderDrawPoint(renderer, cx - y, cy - x);
-        SDL_RenderDrawPoint(renderer, cx + y, cy - x);
-        SDL_RenderDrawPoint(renderer, cx + x, cy - y);
-        y++;
-        if (decision <= 0) {
-            decision += 2 * y + 1;
-        } else {
-            x--;
-            decision += 2 * (y - x) + 1;
-        }
-    }
-}
-
-static void fillCircle(int cx, int cy, int radius, SDL_Color color) {
-    if (!renderer) return;
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
-    for (int dy = -radius; dy <= radius; ++dy) {
-        int span = (int)sqrtf((float)(radius * radius - dy * dy));
-        SDL_RenderDrawLine(renderer, cx - span, cy + dy, cx + span, cy + dy);
-    }
-}
-
-static void fillRingSegment(int cx, int cy, int innerRadius, int outerRadius,
-                            float startDeg, float endDeg, SDL_Color color) {
-    if (!renderer) return;
-    float startRad = startDeg * (float)M_PI / 180.0f;
-    float endRad = endDeg * (float)M_PI / 180.0f;
-    if (endRad < startRad) {
-        endRad += 2.0f * (float)M_PI;
-    }
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-    for (int y = -outerRadius; y <= outerRadius; ++y) {
-        for (int x = -outerRadius; x <= outerRadius; ++x) {
-            float distSq = (float)(x * x + y * y);
-            if (distSq > (float)(outerRadius * outerRadius) ||
-                distSq < (float)(innerRadius * innerRadius)) {
-                continue;
-            }
-            float angle = atan2f(-(float)y, (float)x);
-            if (angle < 0.0f) angle += 2.0f * (float)M_PI;
-            float start = startRad;
-            float end = endRad;
-            if (start < 0.0f) {
-                start += 2.0f * (float)M_PI;
-                end += 2.0f * (float)M_PI;
-            }
-            if (angle < start) angle += 2.0f * (float)M_PI;
-            if (angle >= start && angle <= end) {
-                SDL_RenderDrawPoint(renderer, cx + x, cy + y);
-            }
-        }
-    }
-}
-
-/* Chassis-space text (wheel labels): always 1x scale, drawn on the faceplate. */
-static void drawChassisText(const char *text, int x, int y, SDL_Color color) {
-    int penX = x;
-    for (size_t i = 0; text[i] != '\0'; ++i) {
-        const GlyphPattern *glyph = findGlyph(text[i]);
-        if (!glyph) {
-            penX += 4;
-            continue;
-        }
-        drawGlyphScaled(glyph, penX, y, color, 1, NULL);
-        penX += 6;
-    }
-}
-
 static int measureChassisText(const char *text) {
     int width = 0;
     for (size_t i = 0; text[i] != '\0'; ++i) {
         width += (findGlyph(text[i]) == NULL) ? 4 : 6;
     }
     return width;
+}
+
+/* --- Glyph rendering into the supersampled chassis buffer (AA labels) --- */
+
+/* Draw one glyph into a CRCanvas at (originX,originY) in buffer pixels, each
+ * font cell magnified by `scale`, in colour `c` with alpha `alpha`. */
+static void crDrawGlyph(CRCanvas *cv, const GlyphPattern *glyph,
+                        int originX, int originY, int scale,
+                        CRColor c, float alpha) {
+    if (!glyph) return;
+    for (int row = 0; row < 7; ++row) {
+        for (int col = 0; col < 5; ++col) {
+            if (glyph->rows[row][col] == ' ') continue;
+            for (int sy = 0; sy < scale; ++sy) {
+                for (int sx = 0; sx < scale; ++sx) {
+                    cr_blend(cv, originX + col * scale + sx,
+                                 originY + row * scale + sy, c, alpha);
+                }
+            }
+        }
+    }
+}
+
+/* Draw a string into the buffer with an embossed look: a light (or dark) shadow
+ * offset by 1*scale down-right, then the label colour on top. Returns advance. */
+static void crDrawChassisTextEmboss(CRCanvas *cv, const char *text,
+                                    int x, int y, int scale,
+                                    CRColor label, CRColor emboss) {
+    int penX = x;
+    for (size_t i = 0; text[i] != '\0'; ++i) {
+        const GlyphPattern *glyph = findGlyph(text[i]);
+        if (!glyph) { penX += 4 * scale; continue; }
+        crDrawGlyph(cv, glyph, penX + scale, y + scale, scale, emboss, 0.55f);
+        crDrawGlyph(cv, glyph, penX, y, scale, label, 1.0f);
+        penX += 6 * scale;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -468,116 +498,60 @@ static SDL_Texture *faceplateTexture(const char *path) {
     return g_faceplateTex;
 }
 
-static void renderBody(void) {
+/* Build the body + recessed-bezel layer into the CPU buffer at output
+ * resolution. The screen interior is left transparent-painted as the body fill;
+ * the UI then clears and draws into the screen rect on the native path. */
+static void buildBodyLayer(void) {
+    const DeviceProfile *p = Display_GetActiveProfile();
+    int ss = outputScale();
+    int W = p->chassis.canvasWidth * ss;
+    int H = p->chassis.canvasHeight * ss;
+    if (!chassisLayerEnsure(&g_bodyLayer, W, H)) return;
+
+    CRCanvas cv = { g_bodyLayer.px, W, H };
+    /* Scale the profile geometry into the supersampled scene by temporarily
+     * working in output pixels: cr_paint_* read p->chassis dimensions, so build
+     * a scaled copy of the profile for the scene. */
+    DeviceProfile sp = *p;
+    sp.chassis.canvasWidth  = W;
+    sp.chassis.canvasHeight = H;
+    sp.chassis.cornerRadius = (p->chassis.cornerRadius > 0
+                               ? p->chassis.cornerRadius
+                               : (int)(p->chassis.canvasWidth * 0.085f)) * ss;
+    sp.chassis.bodyInset = (p->chassis.bodyInset > 0
+                            ? p->chassis.bodyInset
+                            : (p->chassis.canvasWidth < 220 ? 8 : 12)) * ss;
+
+    cr_paint_body(&cv, &sp);
+
+    SDL_Rect s = screenRect();
+    cr_paint_bezel(&cv, &sp, s.x * ss, s.y * ss, s.w * ss, s.h * ss);
+}
+
+void Display_RenderBackground(void) {
     if (!renderer) return;
     const DeviceProfile *p = Display_GetActiveProfile();
-    int W = p->chassis.canvasWidth;
-    int H = p->chassis.canvasHeight;
 
     /* Asset path: blit the faceplate scaled to fill the canvas, if one loads. */
     if (p->chassis.faceplateImage) {
         SDL_Texture *tex = faceplateTexture(p->chassis.faceplateImage);
         if (tex) {
-            SDL_Rect dst = { 0, 0, W, H };
+            SDL_Rect dst = { 0, 0, p->chassis.canvasWidth, p->chassis.canvasHeight };
             SDL_RenderCopy(renderer, tex, NULL, &dst);
             return;
         }
         /* Load failed — fall through to the procedural body. */
     }
 
-    SDL_Color top = nunoToSDL(p->chassis.bodyTop);
-    SDL_Color bottom = nunoToSDL(p->chassis.bodyBottom);
-
-    /* Vertical body gradient with a faint ordered dither to avoid banding. */
-    static const uint8_t BAYER4[4][4] = {
-        {  0,  8,  2, 10 },
-        { 12,  4, 14,  6 },
-        {  3, 11,  1,  9 },
-        { 15,  7, 13,  5 }
-    };
-    for (int y = 0; y < H; ++y) {
-        float t = (H <= 1) ? 0.0f : (float)y / (float)(H - 1);
-        SDL_Color base = lerpColor(top, bottom, t);
-        for (int x = 0; x < W; ++x) {
-            int dither = (int)BAYER4[y & 3][x & 3] - 8; /* -8..+7 */
-            SDL_Color c = {
-                clamp_u8(base.r + dither / 4),
-                clamp_u8(base.g + dither / 4),
-                clamp_u8(base.b + dither / 4),
-                255
-            };
-            SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, 255);
-            SDL_RenderDrawPoint(renderer, x, y);
-        }
+    if (g_bodyBuiltFor != p || !g_bodyLayer.tex) {
+        buildBodyLayer();
+        g_bodyBuiltFor = p;
     }
-}
-
-static void renderBezel(void) {
-    if (!renderer) return;
-    const DeviceProfile *p = Display_GetActiveProfile();
-    SDL_Rect s = screenRect();
-    SDL_Color bezel = nunoToSDL(p->chassis.bezelColor);
-
-    SDL_Rect outer = { s.x - 6, s.y - 6, s.w + 12, s.h + 12 };
-    SDL_SetRenderDrawColor(renderer, bezel.r, bezel.g, bezel.b, 255);
-    SDL_RenderFillRect(renderer, &outer);
-
-    /* Dark inner frame + light highlight for a recessed-glass look. */
-    SDL_Rect frame = { s.x - 2, s.y - 2, s.w + 4, s.h + 4 };
-    SDL_SetRenderDrawColor(renderer, clamp_u8(bezel.r - 40), clamp_u8(bezel.g - 40), clamp_u8(bezel.b - 40), 255);
-    SDL_RenderDrawRect(renderer, &frame);
-    SDL_Rect hl = { s.x - 1, s.y - 1, s.w + 2, s.h + 2 };
-    SDL_SetRenderDrawColor(renderer, clamp_u8(bezel.r + 60), clamp_u8(bezel.g + 60), clamp_u8(bezel.b + 60), 200);
-    SDL_RenderDrawRect(renderer, &hl);
-}
-
-void Display_RenderBackground(void) {
-    renderBody();
-    renderBezel();
+    chassisLayerBlit(&g_bodyLayer);
 }
 
 /* --- Click wheel --------------------------------------------------- */
 
-static void renderWheelRing(void) {
-    const WheelLayout *w = &Display_GetActiveProfile()->wheel;
-    SDL_Color light = nunoToSDL(w->ringLight);
-    SDL_Color dark = nunoToSDL(w->ringDark);
-    for (int r = w->outerRadius; r >= w->innerRadius; --r) {
-        float t = (w->outerRadius == w->innerRadius) ? 0.0f
-                : (float)(w->outerRadius - r) / (float)(w->outerRadius - w->innerRadius);
-        SDL_Color color = lerpColor(dark, light, t);
-        fillCircle(w->centerX, w->centerY, r, color);
-    }
-    fillCircle(w->centerX, w->centerY, w->innerRadius, nunoToSDL(w->hubColor));
-
-    SDL_Color outerOutline = { clamp_u8(dark.r - 24), clamp_u8(dark.g - 24), clamp_u8(dark.b - 24), 255 };
-    SDL_Color hubOutline = { clamp_u8(dark.r - 14), clamp_u8(dark.g - 14), clamp_u8(dark.b - 14), 255 };
-    drawCircleOutline(w->centerX, w->centerY, w->outerRadius, outerOutline);
-    /* Delineate the center select button (visible even on white bodies). */
-    drawCircleOutline(w->centerX, w->centerY, w->innerRadius, hubOutline);
-}
-
-static void renderRingLabels(void) {
-    const WheelLayout *w = &Display_GetActiveProfile()->wheel;
-    SDL_Color color = nunoToSDL(w->labelColor);
-    int midR = (w->outerRadius + w->innerRadius) / 2;
-
-    const char *menu = "MENU";
-    const char *prev = "<<";
-    const char *next = ">>";
-    const char *play = "PLAY";
-
-    drawChassisText(menu, w->centerX - measureChassisText(menu) / 2,
-                    w->centerY - midR - 3, color);
-    drawChassisText(play, w->centerX - measureChassisText(play) / 2,
-                    w->centerY + midR - 4, color);
-    drawChassisText(prev, w->centerX - midR - measureChassisText(prev) / 2,
-                    w->centerY - 3, color);
-    drawChassisText(next, w->centerX + midR - measureChassisText(next) / 2,
-                    w->centerY - 3, color);
-}
-
-/* Separate horizontal button row for 3G-style touch wheels. */
 static const char *kRowLabels[4] = { "<<", "MENU", "PLAY", ">>" };
 static const uint8_t kRowButtons[4] = { BUTTON_PREV, BUTTON_MENU, BUTTON_PLAY, BUTTON_NEXT };
 
@@ -589,63 +563,122 @@ static SDL_Rect rowButtonRect(int index) {
     return r;
 }
 
-static void renderButtonRow(uint8_t activeButton) {
-    const WheelLayout *w = &Display_GetActiveProfile()->wheel;
-    SDL_Color label = nunoToSDL(w->labelColor);
-    SDL_Color highlight = { 200, 200, 205, 220 };
-    for (int i = 0; i < 4; ++i) {
-        SDL_Rect r = rowButtonRect(i);
-        if (activeButton == kRowButtons[i]) {
-            SDL_SetRenderDrawColor(renderer, highlight.r, highlight.g, highlight.b, highlight.a);
-            SDL_RenderFillRect(renderer, &r);
+/* Soft press-glow over a quadrant of the touch ring (output-buffer space). */
+static void crWheelPressGlow(CRCanvas *cv, const WheelLayout *w, int ss,
+                             uint8_t activeButton) {
+    if (activeButton == 0) return;
+    float cx = (float)w->centerX * ss;
+    float cy = (float)w->centerY * ss;
+    float inner = (float)(w->innerRadius + 3) * ss;
+    float outer = (float)(w->outerRadius - 2) * ss;
+    CRColor glow = cr_rgb(1.0f, 1.0f, 1.0f);
+    glow.a = 0.45f;
+    switch (activeButton) {
+        case BUTTON_MENU: cr_fill_arc_glow(cv, cx, cy, inner, outer, 45.0f, 135.0f, glow); break;
+        case BUTTON_PREV: cr_fill_arc_glow(cv, cx, cy, inner, outer, 135.0f, 225.0f, glow); break;
+        case BUTTON_PLAY: cr_fill_arc_glow(cv, cx, cy, inner, outer, 225.0f, 315.0f, glow); break;
+        case BUTTON_NEXT: cr_fill_arc_glow(cv, cx, cy, inner, outer, 315.0f, 405.0f, glow); break;
+        case BUTTON_CENTER: {
+            CRColor c = cr_rgb(1.0f, 1.0f, 1.0f); c.a = 0.40f;
+            cr_fill_circle(cv, cx, cy, (float)(w->innerRadius - 3) * ss, c);
+            break;
         }
-        int tw = measureChassisText(kRowLabels[i]);
-        drawChassisText(kRowLabels[i], r.x + (r.w - tw) / 2, r.y + 6, label);
+        default: break;
     }
 }
 
-static void renderWheelHighlight(uint8_t activeButton) {
-    if (activeButton == 0) return;
-    const WheelLayout *w = &Display_GetActiveProfile()->wheel;
-    SDL_Color highlight = { 200, 200, 205, 220 };
-    int inner = w->innerRadius + 2;
-    int outer = w->outerRadius - 2;
-    switch (activeButton) {
-        case BUTTON_MENU:
-            fillRingSegment(w->centerX, w->centerY, inner, outer, 45.0f, 135.0f, highlight);
-            break;
-        case BUTTON_NEXT:
-            fillRingSegment(w->centerX, w->centerY, inner, outer, 315.0f, 405.0f, highlight);
-            break;
-        case BUTTON_PLAY:
-            fillRingSegment(w->centerX, w->centerY, inner, outer, 225.0f, 315.0f, highlight);
-            break;
-        case BUTTON_PREV:
-            fillRingSegment(w->centerX, w->centerY, inner, outer, 135.0f, 225.0f, highlight);
-            break;
-        case BUTTON_CENTER: {
-            SDL_Color centerHighlight = { 210, 210, 220, 255 };
-            fillCircle(w->centerX, w->centerY, w->innerRadius - 2, centerHighlight);
-            break;
+/* Build the entire wheel layer (ring, hub, glow, labels) into the buffer. */
+static void buildWheelLayer(uint8_t activeButton) {
+    const DeviceProfile *p = Display_GetActiveProfile();
+    const WheelLayout *w = &p->wheel;
+    int ss = outputScale();
+    int W = p->chassis.canvasWidth * ss;
+    int H = p->chassis.canvasHeight * ss;
+    if (!chassisLayerEnsure(&g_wheelLayer, W, H)) return;
+    memset(g_wheelLayer.px, 0, (size_t)W * (size_t)H * sizeof(uint32_t));
+
+    CRCanvas cv = { g_wheelLayer.px, W, H };
+
+    /* Subtle glass glare over the screen (this layer blits over the UI). */
+    SDL_Rect s = screenRect();
+    cr_paint_screen_glare(&cv, s.x * ss, s.y * ss, s.w * ss, s.h * ss);
+
+    DeviceProfile sp = *p;
+    sp.wheel.centerX = w->centerX * ss;
+    sp.wheel.centerY = w->centerY * ss;
+    sp.wheel.outerRadius = w->outerRadius * ss;
+    sp.wheel.innerRadius = w->innerRadius * ss;
+
+    cr_paint_wheel(&cv, &sp);
+
+    CRColor label = cr_from_nuno(w->labelColor);
+    /* Emboss colour: lighten on dark labels, darken on light labels. */
+    float lum = 0.3f * label.r + 0.6f * label.g + 0.1f * label.b;
+    CRColor emboss = (lum < 0.5f) ? cr_rgb(1.0f, 1.0f, 1.0f) : cr_rgb(0.0f, 0.0f, 0.0f);
+
+    if (w->type == WHEEL_TOUCH_BUTTONS) {
+        if (activeButton == BUTTON_CENTER) {
+            crWheelPressGlow(&cv, w, ss, BUTTON_CENTER);
         }
-        default:
-            break;
+        /* Separate button row, drawn into the buffer with embossed labels. */
+        for (int i = 0; i < 4; ++i) {
+            SDL_Rect r = rowButtonRect(i);
+            int bx = r.x * ss, by = r.y * ss, bw = r.w * ss, bh = r.h * ss;
+            /* subtle pill background so the row reads as buttons */
+            CRColor pill = cr_from_nuno(p->chassis.bodyBottom);
+            cr_blend(&cv, 0, 0, pill, 0.0f); /* no-op guard */
+            CRRoundRect rr;
+            rr.cx = bx + bw * 0.5f; rr.cy = by + bh * 0.5f;
+            rr.hx = bw * 0.5f - 2 * ss; rr.hy = bh * 0.5f;
+            rr.r = bh * 0.5f;
+            if (activeButton == kRowButtons[i]) {
+                rr.top = cr_rgb(0.95f, 0.95f, 0.98f);
+                rr.bottom = cr_rgb(0.80f, 0.80f, 0.85f);
+            } else {
+                rr.top = cr_add(pill, 0.06f);
+                rr.bottom = cr_add(pill, -0.06f);
+            }
+            rr.shade = NULL; rr.user = NULL;
+            cr_fill_round_rect(&cv, &rr);
+            int tw = measureChassisText(kRowLabels[i]) * ss;
+            crDrawChassisTextEmboss(&cv, kRowLabels[i],
+                                    bx + (bw - tw) / 2,
+                                    by + (bh - 7 * ss) / 2, ss, label, emboss);
+        }
+    } else {
+        crWheelPressGlow(&cv, w, ss, activeButton);
+        int midR = (w->outerRadius + w->innerRadius) / 2;
+        /* Scale labels up on large wheels so they don't read as tiny on the 5G/
+         * classic; combine with the supersample factor for the buffer pen. */
+        int ls = (w->outerRadius >= 150) ? 2 : 1;
+        int gs = ss * ls;                 /* glyph scale in buffer pixels */
+        int gh = 7 * gs;                  /* glyph cell height in buffer px */
+        const char *menu = "MENU", *prev = "<<", *next = ">>", *play = "PLAY";
+        crDrawChassisTextEmboss(&cv, menu,
+            w->centerX * ss - measureChassisText(menu) * gs / 2,
+            (w->centerY - midR) * ss - gh / 2, gs, label, emboss);
+        crDrawChassisTextEmboss(&cv, play,
+            w->centerX * ss - measureChassisText(play) * gs / 2,
+            (w->centerY + midR) * ss - gh / 2, gs, label, emboss);
+        crDrawChassisTextEmboss(&cv, prev,
+            (w->centerX - midR) * ss - measureChassisText(prev) * gs / 2,
+            w->centerY * ss - gh / 2, gs, label, emboss);
+        crDrawChassisTextEmboss(&cv, next,
+            (w->centerX + midR) * ss - measureChassisText(next) * gs / 2,
+            w->centerY * ss - gh / 2, gs, label, emboss);
     }
 }
 
 void Display_RenderClickWheel(uint8_t activeButton) {
-    const WheelLayout *w = &Display_GetActiveProfile()->wheel;
-    renderWheelRing();
-    if (w->type == WHEEL_TOUCH_BUTTONS) {
-        /* The ring is unlabeled; navigation labels live in the separate row. */
-        if (activeButton == BUTTON_CENTER) {
-            renderWheelHighlight(BUTTON_CENTER);
-        }
-        renderButtonRow(activeButton);
-    } else {
-        renderWheelHighlight(activeButton);
-        renderRingLabels();
+    if (!renderer) return;
+    const DeviceProfile *p = Display_GetActiveProfile();
+    if (g_wheelBuiltFor != p || g_wheelBuiltButton != (int)activeButton ||
+        !g_wheelLayer.tex) {
+        buildWheelLayer(activeButton);
+        g_wheelBuiltFor = p;
+        g_wheelBuiltButton = (int)activeButton;
     }
+    chassisLayerBlit(&g_wheelLayer);
 }
 
 void Display_Present(void) {
@@ -717,6 +750,16 @@ bool Display_Init(const char *title, const DeviceProfile *profile) {
     return createWindow(title);
 }
 
+/* Free both chassis layers and reset their build trackers. Call whenever the
+ * renderer (which owns the textures) is about to be destroyed. */
+static void releaseChassisLayers(void) {
+    chassisLayerFree(&g_bodyLayer);
+    chassisLayerFree(&g_wheelLayer);
+    g_bodyBuiltFor = NULL;
+    g_wheelBuiltFor = NULL;
+    g_wheelBuiltButton = -1;
+}
+
 bool Display_SwitchProfile(const DeviceProfile *profile) {
     if (!profile) {
         return false;
@@ -724,8 +767,9 @@ bool Display_SwitchProfile(const DeviceProfile *profile) {
     char title[128];
     snprintf(title, sizeof(title), "NUNO Simulator — %s", profile->displayName);
 
-    /* The faceplate texture belongs to the renderer being torn down. */
+    /* The faceplate + chassis textures belong to the renderer being torn down. */
     releaseFaceplate();
+    releaseChassisLayers();
     if (renderer) {
         SDL_DestroyRenderer(renderer);
         renderer = NULL;
@@ -740,6 +784,7 @@ bool Display_SwitchProfile(const DeviceProfile *profile) {
 
 void Display_Shutdown(void) {
     releaseFaceplate();
+    releaseChassisLayers();
     if (renderer) {
         SDL_DestroyRenderer(renderer);
         renderer = NULL;

@@ -82,6 +82,13 @@ void MenuRenderer_StartTransition(MenuType from, MenuType to, uint32_t currentTi
     transitionState.isActive = (from != to);
 }
 
+/* A row "drills in" (opens another list) when it targets a submenu other than
+ * the play-through Now Playing view. Those rows get a right-chevron, matching
+ * the real iPod menu affordance. */
+static bool itemDrillsIn(const MenuItem* item) {
+    return item->submenu != MENU_NOW_PLAYING;
+}
+
 static void renderMenuItem(const MenuItem* item, uint8_t index, bool selected) {
     int y = TITLE_BAR_HEIGHT + (index * ITEM_HEIGHT) - (int)scrollState.currentScrollOffset;
 
@@ -93,10 +100,15 @@ static void renderMenuItem(const MenuItem* item, uint8_t index, bool selected) {
         Display_FillSelection(0, y, DISPLAY_WIDTH, ITEM_HEIGHT);
     }
 
-    Display_DrawText(item->text,
-                     TEXT_MARGIN,
-                     y + (ITEM_HEIGHT - TEXT_HEIGHT) / 2,
-                     selected ? SELECTED_TEXT_COLOR : NORMAL_TEXT_COLOR);
+    uint8_t fg = selected ? SELECTED_TEXT_COLOR : NORMAL_TEXT_COLOR;
+    int textY = y + (ITEM_HEIGHT - TEXT_HEIGHT) / 2;
+    Display_DrawText(item->text, TEXT_MARGIN, textY, fg);
+
+    /* Right-aligned drill-in chevron, like the iPod's submenu indicator. */
+    if (itemDrillsIn(item)) {
+        int chevW = Display_MeasureText(">");
+        Display_DrawText(">", DISPLAY_WIDTH - chevW - TEXT_MARGIN, textY, fg);
+    }
 }
 
 static void renderProgressBar(uint16_t current, uint16_t total) {
