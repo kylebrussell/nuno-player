@@ -15,8 +15,26 @@ Currently in the early stages of development, focusing on core embedded systems 
 
 ### Prototype Hardware (2026 refresh)
 - MCU dev board: STM32 NUCLEO-H753ZI (preferred) or NUCLEO-H743ZI2 (original target; often listed as obsolete)
-- Audio: WM8960 I2S codec module (I2C control)
+- Audio: WM8960 I2S codec module (I2C control) for the prototype; ESS ES9038Q2M is the premium production DAC
 - Input: Azoteq IQS550-based I2C trackpad module + single click switch
+
+#### Audio codec (build-time selectable)
+The audio pipeline talks only to the portable `AudioCodec_*` HAL
+(`include/nuno/audio_codec.h`), so the DAC is swappable at firmware build time:
+
+```bash
+cmake -S . -B build -DBUILD_SIM=OFF -DNUNO_CODEC=WM8960     # prototype (default)
+cmake -S . -B build -DBUILD_SIM=OFF -DNUNO_CODEC=ES9038Q2M  # premium production DAC
+```
+
+- `WM8960` → `src/drivers/wm8960/wm8960.c` — cheap integrated codec, simple to
+  bring up; the current prototype choice.
+- `ES9038Q2M` → `src/drivers/es9038q2m/es9038q2m_codec.c` — flagship ESS SABRE
+  DAC (an adapter over the `ES9038Q2M_*` driver); the premium target, but needs
+  a clean analog supply + master clock and is untested on-device.
+
+The simulator always uses a stub codec, so this option only affects firmware
+builds.
 
 ## Simulator Quick Start
 

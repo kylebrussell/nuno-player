@@ -116,8 +116,13 @@ bool ES9038Q2M_Init(const ES9038Q2M_Config* config) {
     // set volume
     if (!ES9038Q2M_SetVolume(config->volume_left, config->volume_right))
         return false;
-    // configure clock with robust validation
-    if (!ES9038Q2M_ConfigureClock(config->sample_rate, config->bit_depth)) // bit_depth used illustratively as master_clock
+    // configure clock with the DAC master clock (NOT bit_depth). Derive a
+    // sensible master clock from the sample-rate family when none was supplied.
+    uint32_t master_clock = config->master_clock;
+    if (master_clock == 0u) {
+        master_clock = (config->sample_rate % 11025u == 0u) ? 22579200u : 24576000u;
+    }
+    if (!ES9038Q2M_ConfigureClock(config->sample_rate, master_clock))
         return false;
     return true;
 }

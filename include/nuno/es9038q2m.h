@@ -52,6 +52,10 @@ typedef struct {
     bool dsd_mode;
     uint32_t sample_rate;
     uint8_t bit_depth;
+    /* DAC master clock in Hz (e.g. 22.5792 MHz for the 44.1k family, 24.576 MHz
+     * for the 48k family). If left 0, ES9038Q2M_Init() derives it from the
+     * sample-rate family. */
+    uint32_t master_clock;
 } ES9038Q2M_Config;
 
 // Function Prototypes

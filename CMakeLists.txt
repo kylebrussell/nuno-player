@@ -88,6 +88,18 @@ target_link_libraries(core_ui PUBLIC music_catalog)
 
 # Executable Targets
 if(NOT BUILD_SIM)
+  # Audio codec driver selection (build time). Both implement the portable
+  # AudioCodec_* HAL; exactly one is compiled into the firmware. WM8960 is the
+  # cheap prototype codec (default); ES9038Q2M is the premium production DAC.
+  set(NUNO_CODEC "WM8960" CACHE STRING "Audio codec driver: WM8960 or ES9038Q2M")
+  set_property(CACHE NUNO_CODEC PROPERTY STRINGS WM8960 ES9038Q2M)
+  if(NUNO_CODEC STREQUAL "ES9038Q2M")
+    set(NUNO_CODEC_SRC src/drivers/es9038q2m/es9038q2m_codec.c)
+  else()
+    set(NUNO_CODEC_SRC src/drivers/wm8960/wm8960.c)
+  endif()
+  message(STATUS "Audio codec driver: ${NUNO_CODEC}")
+
   add_library(platform
       src/platform/i2c.c
       src/platform/gpio.c
@@ -95,13 +107,15 @@ if(NOT BUILD_SIM)
       src/platform/audio_i2s.c
       src/platform/audio_task.c
       src/platform/input/trackpad.c
+      ${NUNO_CODEC_SRC}
   )
   target_include_directories(platform PUBLIC
       "${CMAKE_CURRENT_SOURCE_DIR}/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/src"
   )
-  # audio_task.c is a FreeRTOS producer task; it needs the kernel headers.
-  target_link_libraries(platform PUBLIC freertos_kernel)
+  # audio_task.c needs the FreeRTOS kernel headers; the ES9038Q2M codec adapter
+  # needs the ES9038Q2M_* driver symbols (the `drivers` library).
+  target_link_libraries(platform PUBLIC freertos_kernel drivers)
 
   add_executable(nuno-player
       src/platform/main.c
