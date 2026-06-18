@@ -84,7 +84,12 @@ static void chassisLayerBlit(ChassisLayer *layer) {
     int lw = 0, lh = 0;
     SDL_RenderGetLogicalSize(renderer, &lw, &lh);
     SDL_RenderSetLogicalSize(renderer, 0, 0); /* draw in real output pixels */
-    SDL_Rect dst = { 0, 0, layer->w, layer->h };
+    /* Scale the supersampled chassis buffer (canvas * windowScale) to fill the
+     * actual drawable, which is smaller than the buffer when the window was
+     * shrunk to fit the display. Downsampling the AA buffer keeps edges crisp. */
+    int outW = layer->w, outH = layer->h;
+    SDL_GetRendererOutputSize(renderer, &outW, &outH);
+    SDL_Rect dst = { 0, 0, outW, outH };
     SDL_RenderCopy(renderer, layer->tex, NULL, &dst);
     SDL_RenderSetLogicalSize(renderer, lw, lh); /* restore for screen UI */
 }
@@ -716,10 +721,34 @@ static bool createWindow(const char *title) {
     const DeviceProfile *p = Display_GetActiveProfile();
     int scale = p->chassis.windowScale > 0 ? p->chassis.windowScale : 2;
 
+    /* windowScale is the *desired* magnification, but on a laptop panel the tall
+     * bodies (and especially the nanos at 4x) are taller than the screen. Shrink
+     * the window uniformly so it fits the display's usable work area (menu bar /
+     * Dock excluded) with a margin. The chassis art is built at the full
+     * supersampled resolution and scaled down into the window (see
+     * chassisLayerBlit), so fitting only sharpens it; the logical size stays
+     * pinned to the canvas, so the screen UI and mouse mapping are unaffected. */
+    int winW = p->chassis.canvasWidth * scale;
+    int winH = p->chassis.canvasHeight * scale;
+    SDL_Rect ub;
+    if (SDL_GetDisplayUsableBounds(0, &ub) == 0 && ub.w > 0 && ub.h > 0) {
+        const float margin = 0.92f;
+        float fit = 1.0f;
+        float fw = (float)ub.w * margin / (float)winW;
+        float fh = (float)ub.h * margin / (float)winH;
+        if (fw < fit) fit = fw;
+        if (fh < fit) fit = fh;
+        if (fit < 1.0f) {
+            winW = (int)((float)winW * fit + 0.5f);
+            winH = (int)((float)winH * fit + 0.5f);
+        }
+    }
+    printf("Window: %dx%d px (body %dx%d @ %dx, fit-to-display)\n",
+           winW, winH, p->chassis.canvasWidth, p->chassis.canvasHeight, scale);
+
     window = SDL_CreateWindow(title,
                               SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                              p->chassis.canvasWidth * scale,
-                              p->chassis.canvasHeight * scale,
+                              winW, winH,
                               SDL_WINDOW_SHOWN);
     if (!window) {
         fprintf(stderr, "SDL_CreateWindow Error: %s\n", SDL_GetError());
